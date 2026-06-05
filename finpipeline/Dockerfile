@@ -13,10 +13,10 @@ COPY pyproject.toml poetry.lock* ./
 # install dependencies without creating a virtualenv
 # inside a container the whole environment is isolated already
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-interaction --no-ansi --only main
+    && poetry install --no-interaction --no-ansi --only main --no-root
 
 # copy the rest of your code
-COPY src/ ./src/
+COPY finpipeline/src/ ./src/
 
 # expose port 8000
 EXPOSE 8000

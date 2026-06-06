@@ -2,8 +2,11 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime, timedelta
 import time
 import logging
+import json
 
 from src.analytics import (
     get_price_history,
@@ -13,23 +16,61 @@ from src.analytics import (
     get_market_summary
 )
 from src.db import get_connection
+from src.fetchers.stock_fetcher import fetch_and_store_stocks
+from src.fetchers.macro_fetcher import fetch_and_store_indicators
 
-# set up structured logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(message)s'
-)
+
+# ── structured JSON logging ────────────────────────────────────────────────
+class JSONFormatter(logging.Formatter):
+    def format(self, record):
+        return json.dumps({
+            'timestamp': self.formatTime(record),
+            'level': record.levelname,
+            'message': record.getMessage(),
+            'module': record.module
+        })
+
+handler = logging.StreamHandler()
+handler.setFormatter(JSONFormatter())
+logging.basicConfig(level=logging.INFO, handlers=[handler])
 logger = logging.getLogger(__name__)
 
 # valid tickers and indicators your API supports
 VALID_TICKERS = {'AAPL', 'GOOGL', 'MSFT', 'TSLA'}
 VALID_INDICATORS = {'CPI', 'FEDFUNDS', 'UNRATE', 'GDP', 'T10Y2Y'}
 
+scheduler = AsyncIOScheduler()
 
+
+# ── scheduled pipeline jobs ────────────────────────────────────────────────
+def run_stock_pipeline():
+    """Fetch last 7 days of stock data."""
+    end = datetime.now().strftime('%Y-%m-%d')
+    start = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    logger.info("Scheduled stock pipeline starting...")
+    result = fetch_and_store_stocks(['AAPL', 'GOOGL', 'MSFT', 'TSLA'], start, end)
+    logger.info(f"Scheduled stock pipeline done: {result['total_inserted']} records, errors: {result['errors'] or 'none'}")
+
+
+def run_macro_pipeline():
+    """Fetch latest macro data."""
+    end = datetime.now().strftime('%Y-%m-%d')
+    start = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
+    logger.info("Scheduled macro pipeline starting...")
+    result = fetch_and_store_indicators(start, end)
+    logger.info(f"Scheduled macro pipeline done: {result['total_inserted']} records")
+
+
+# ── lifespan: startup + shutdown ───────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting finpipeline API")
+    scheduler.add_job(run_stock_pipeline, 'cron', hour=18, minute=0)   # 6pm daily
+    scheduler.add_job(run_macro_pipeline, 'cron', day_of_week='mon', hour=9)  # monday 9am
+    scheduler.start()
+    logger.info("Scheduler started")
     yield
+    scheduler.shutdown()
     logger.info("Shutting down finpipeline API")
 
 
@@ -69,6 +110,54 @@ def health_check():
         return {"status": "healthy", "database": "connected"}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
+
+
+# ── metrics ────────────────────────────────────────────────────────────────
+@app.get("/metrics")
+def metrics():
+    """Basic API and pipeline health metrics."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM stock_prices")
+        stock_count = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM economic_indicators")
+        indicator_count = cursor.fetchone()[0]
+
+        cursor.execute("""
+            SELECT source, MAX(completed_at) as last_run, SUM(records_fetched) as total_fetched
+            FROM pipeline_runs
+            WHERE status = 'success'
+            GROUP BY source
+        """)
+        pipeline_stats = [
+            {
+                'source': row[0],
+                'last_successful_run': str(row[1]) if row[1] else None,
+                'total_records_fetched': int(row[2])
+            }
+            for row in cursor.fetchall()
+        ]
+
+        cursor.execute("SELECT MAX(date) FROM stock_prices")
+        latest_stock_date = cursor.fetchone()[0]
+
+        cursor.close()
+        conn.close()
+
+        return {
+            "database": {
+                "stock_prices_count": stock_count,
+                "economic_indicators_count": indicator_count,
+                "latest_stock_date": str(latest_stock_date) if latest_stock_date else None
+            },
+            "pipeline": pipeline_stats
+        }
+    except Exception as e:
+        logger.error(f"Error fetching metrics: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ── stock endpoints ────────────────────────────────────────────────────────

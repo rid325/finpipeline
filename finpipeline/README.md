@@ -42,6 +42,22 @@ audit for any unauthorized access.
 
 ---
 
+## Live API
+
+Deployed on Railway: https://finpipeline-production.up.railway.app
+
+```
+GET /health
+GET /metrics
+GET /stocks/summary
+GET /stocks/{ticker}/history
+GET /stocks/{ticker}/volatility
+GET /stocks/{ticker}/rolling-average
+GET /macro/{indicator}
+GET /pipeline/runs
+GET /docs
+```
+
 ## Setup
 
 ```bash

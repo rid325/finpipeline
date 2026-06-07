@@ -17,6 +17,8 @@ RUN poetry config virtualenvs.create false \
 
 # copy the rest of your code
 COPY finpipeline/src/ ./src/
+COPY finpipeline/migrations/ ./migrations/
+COPY finpipeline/alembic.ini ./
 
 # expose port 8000
 EXPOSE 8000

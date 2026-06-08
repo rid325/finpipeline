@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FinPipeline Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { background: #0f172a; color: #e2e8f0; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; }
+    .stat-value { font-size: 2rem; font-weight: 700; color: #f8fafc; }
+    .positive { color: #22c55e; }
+    .negative { color: #ef4444; }
+    select, button { background: #334155; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 6px 12px; }
+    button:hover { background: #475569; cursor: pointer; }
+  </style>
+</head>
+<body class="min-h-screen p-6">
+
+  <!-- header -->
+  <div class="mb-8">
+    <h1 class="text-3xl font-bold text-white">FinPipeline</h1>
+    <p class="text-slate-400 mt-1">Financial data pipeline dashboard</p>
+    <div id="api-status" class="mt-2 text-sm"></div>
+  </div>
+
+  <!-- market summary cards -->
+  <div class="grid grid-cols-2 gap-4 mb-8 lg:grid-cols-4" id="summary-cards">
+    <div class="card p-4 animate-pulse"><div class="h-4 bg-slate-700 rounded mb-2"></div><div class="h-8 bg-slate-700 rounded"></div></div>
+    <div class="card p-4 animate-pulse"><div class="h-4 bg-slate-700 rounded mb-2"></div><div class="h-8 bg-slate-700 rounded"></div></div>
+    <div class="card p-4 animate-pulse"><div class="h-4 bg-slate-700 rounded mb-2"></div><div class="h-8 bg-slate-700 rounded"></div></div>
+    <div class="card p-4 animate-pulse"><div class="h-4 bg-slate-700 rounded mb-2"></div><div class="h-8 bg-slate-700 rounded"></div></div>
+  </div>
+
+  <!-- price chart -->
+  <div class="card p-6 mb-6">
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+      <h2 class="text-lg font-semibold">Price History + Rolling Average</h2>
+      <div class="flex gap-2">
+        <select id="ticker-select">
+          <option value="AAPL">AAPL</option>
+          <option value="GOOGL">GOOGL</option>
+          <option value="MSFT">MSFT</option>
+          <option value="TSLA">TSLA</option>
+        </select>
+        <select id="window-select">
+          <option value="7">7-day MA</option>
+          <option value="30" selected>30-day MA</option>
+          <option value="60">60-day MA</option>
+        </select>
+        <button onclick="loadPriceChart()">Update</button>
+      </div>
+    </div>
+    <canvas id="price-chart" height="100"></canvas>
+  </div>
+
+  <!-- volatility + macro row -->
+  <div class="grid grid-cols-1 gap-6 mb-6 lg:grid-cols-2">
+    <div class="card p-6">
+      <h2 class="text-lg font-semibold mb-4">Annualized Volatility (90 days)</h2>
+      <canvas id="volatility-chart" height="200"></canvas>
+    </div>
+    <div class="card p-6">
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h2 class="text-lg font-semibold">Macro Indicator</h2>
+        <select id="indicator-select" onchange="loadMacroChart()">
+          <option value="FEDFUNDS">Fed Funds Rate</option>
+          <option value="CPI">CPI</option>
+          <option value="UNRATE">Unemployment</option>
+          <option value="T10Y2Y">Yield Curve</option>
+          <option value="GDP">GDP</option>
+        </select>
+      </div>
+      <canvas id="macro-chart" height="200"></canvas>
+    </div>
+  </div>
+
+  <!-- pipeline health -->
+  <div class="card p-6">
+    <h2 class="text-lg font-semibold mb-4">Pipeline Health</h2>
+    <div id="pipeline-table">Loading...</div>
+  </div>
+
+  <script>
+    const API = 'https://finpipeline-production.up.railway.app';
+
+    let priceChartInstance = null;
+    let macroChartInstance = null;
+    let volatilityChartInstance = null;
+
+    async function fetchJSON(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
+    function formatChange(pct) {
+      const sign = pct >= 0 ? '+' : '';
+      const cls = pct >= 0 ? 'positive' : 'negative';
+      return `<span class="${cls}">${sign}${pct.toFixed(2)}%</span>`;
+    }
+
+    async function checkHealth() {
+      try {
+        const data = await fetchJSON(`${API}/health`);
+        document.getElementById('api-status').innerHTML =
+          `<span class="positive">● API ${data.status} — database ${data.database}</span>`;
+      } catch {
+        document.getElementById('api-status').innerHTML =
+          `<span class="negative">● API unreachable</span>`;
+      }
+    }
+
+    async function loadSummaryCards() {
+      try {
+        const data = await fetchJSON(`${API}/stocks/summary`);
+        const container = document.getElementById('summary-cards');
+        container.innerHTML = data.data.map(stock => `
+          <div class="card p-4">
+            <div class="text-slate-400 text-sm font-medium mb-1">${stock.ticker}</div>
+            <div class="stat-value">$${stock.latest_price.toFixed(2)}</div>
+            <div class="mt-1 text-sm">${formatChange(stock['30d_change_pct'])} 30d</div>
+            <div class="text-slate-500 text-xs mt-1">${stock.latest_date}</div>
+          </div>
+        `).join('');
+      } catch (e) {
+        document.getElementById('summary-cards').innerHTML =
+          `<div class="text-red-400">Failed to load summary: ${e.message}</div>`;
+      }
+    }
+
+    async function loadPriceChart() {
+      const ticker = document.getElementById('ticker-select').value;
+      const window = document.getElementById('window-select').value;
+      try {
+        const data = await fetchJSON(`${API}/stocks/${ticker}/rolling-average?window=${window}`);
+        const labels = data.data.map(d => d.date);
+        const closes = data.data.map(d => d.close);
+        const averages = data.data.map(d => d.rolling_avg);
+
+        if (priceChartInstance) priceChartInstance.destroy();
+        priceChartInstance = new Chart(document.getElementById('price-chart'), {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              { label: `${ticker} Close`, data: closes, borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.05)', borderWidth: 1.5, pointRadius: 0, tension: 0.1 },
+              { label: `${window}-day MA`, data: averages, borderColor: '#f59e0b', borderWidth: 2, pointRadius: 0, tension: 0.3 }
+            ]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { labels: { color: '#94a3b8' } } },
+            scales: {
+              x: { ticks: { color: '#64748b', maxTicksLimit: 8 }, grid: { color: '#1e293b' } },
+              y: { ticks: { color: '#64748b' }, grid: { color: '#334155' } }
+            }
+          }
+        });
+      } catch (e) { console.error('Price chart error:', e); }
+    }
+
+    async function loadVolatilityChart() {
+      try {
+        const tickers = ['AAPL', 'GOOGL', 'MSFT', 'TSLA'];
+        const results = await Promise.all(tickers.map(t => fetchJSON(`${API}/stocks/${t}/volatility?days=90`)));
+        const labels = results.map(r => r.ticker);
+        const values = results.map(r => r.volatility_pct);
+        const colors = values.map(v => v < 25 ? '#22c55e' : v < 40 ? '#f59e0b' : '#ef4444');
+
+        if (volatilityChartInstance) volatilityChartInstance.destroy();
+        volatilityChartInstance = new Chart(document.getElementById('volatility-chart'), {
+          type: 'bar',
+          data: { labels, datasets: [{ label: 'Annualized Volatility %', data: values, backgroundColor: colors, borderRadius: 6 }] },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+              y: { ticks: { color: '#94a3b8', callback: v => v + '%' }, grid: { color: '#334155' } }
+            }
+          }
+        });
+      } catch (e) { console.error('Volatility chart error:', e); }
+    }
+
+    async function loadMacroChart() {
+      const indicator = document.getElementById('indicator-select').value;
+      try {
+        const data = await fetchJSON(`${API}/macro/${indicator}?start_date=2020-01-01&end_date=2024-06-01`);
+        const labels = data.data.map(d => d.date);
+        const values = data.data.map(d => d.value);
+
+        if (macroChartInstance) macroChartInstance.destroy();
+        macroChartInstance = new Chart(document.getElementById('macro-chart'), {
+          type: 'line',
+          data: { labels, datasets: [{ label: indicator, data: values, borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.05)', borderWidth: 2, pointRadius: 2, tension: 0.3 }] },
+          options: {
+            responsive: true,
+            plugins: { legend: { labels: { color: '#94a3b8' } } },
+            scales: {
+              x: { ticks: { color: '#64748b', maxTicksLimit: 8 }, grid: { color: '#334155' } },
+              y: { ticks: { color: '#64748b' }, grid: { color: '#334155' } }
+            }
+          }
+        });
+      } catch (e) { console.error('Macro chart error:', e); }
+    }
+
+    async function loadPipelineHealth() {
+      try {
+        const [runs, metrics] = await Promise.all([
+          fetchJSON(`${API}/pipeline/runs?limit=5`),
+          fetchJSON(`${API}/metrics`)
+        ]);
+
+        document.getElementById('pipeline-table').innerHTML = `
+          <div class="grid grid-cols-3 gap-4 mb-6">
+            <div class="bg-slate-800 rounded-lg p-3">
+              <div class="text-slate-400 text-xs mb-1">Stock prices</div>
+              <div class="text-xl font-bold">${metrics.database.stock_prices_count.toLocaleString()}</div>
+            </div>
+            <div class="bg-slate-800 rounded-lg p-3">
+              <div class="text-slate-400 text-xs mb-1">Macro indicators</div>
+              <div class="text-xl font-bold">${metrics.database.economic_indicators_count.toLocaleString()}</div>
+            </div>
+            <div class="bg-slate-800 rounded-lg p-3">
+              <div class="text-slate-400 text-xs mb-1">Latest data</div>
+              <div class="text-xl font-bold">${metrics.database.latest_stock_date}</div>
+            </div>
+          </div>
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-slate-400 text-left border-b border-slate-700">
+                <th class="pb-2 pr-4">Source</th>
+                <th class="pb-2 pr-4">Status</th>
+                <th class="pb-2 pr-4">Records</th>
+                <th class="pb-2">Started</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${runs.runs.map(r => `
+                <tr class="border-b border-slate-800">
+                  <td class="py-2 pr-4 font-mono text-xs">${r.source}</td>
+                  <td class="py-2 pr-4"><span class="${r.status === 'success' ? 'positive' : 'negative'}">${r.status}</span></td>
+                  <td class="py-2 pr-4">${r.records_fetched}</td>
+                  <td class="py-2 text-slate-400 text-xs">${r.started_at.slice(0, 19)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (e) {
+        document.getElementById('pipeline-table').innerHTML =
+          `<div class="text-red-400">Failed to load pipeline data: ${e.message}</div>`;
+      }
+    }
+
+    async function init() {
+      await checkHealth();
+      await Promise.all([loadSummaryCards(), loadPriceChart(), loadVolatilityChart(), loadMacroChart(), loadPipelineHealth()]);
+    }
+
+    init();
+  </script>
+</body>
+</html>

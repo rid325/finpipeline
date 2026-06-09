@@ -16,8 +16,7 @@ from src.analytics import (
     get_market_summary
 )
 from src.db import get_connection
-from src.fetchers.stock_fetcher import fetch_and_store_stocks
-from src.fetchers.macro_fetcher import fetch_and_store_indicators
+from src.regime import get_macro_fingerprint, get_similar_periods, get_forward_returns
 
 
 # ── structured JSON logging ────────────────────────────────────────────────
@@ -291,4 +290,51 @@ def pipeline_runs(limit: int = Query(default=10, ge=1, le=100)):
         }
     except Exception as e:
         logger.error(f"Error fetching pipeline runs: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# ── analysis endpoints ─────────────────────────────────────────────────────
+@app.get("/analysis/regime")
+def current_regime():
+    """Current macro regime fingerprint."""
+    try:
+        return get_macro_fingerprint()
+    except Exception as e:
+        logger.error(f"Error computing regime: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/analysis/outlook")
+def stock_outlook(
+    ticker: str = Query(description="Stock ticker e.g. AAPL"),
+    horizon: int = Query(default=60, ge=20, le=120, description="Forward horizon in trading days"),
+    n_similar: int = Query(default=8, ge=3, le=20, description="Number of similar periods to use")
+):
+    """
+    Given the current macro environment, find historically similar periods
+    and return how the stock performed in the following horizon days.
+    """
+    ticker = ticker.upper()
+    if ticker not in VALID_TICKERS:
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
+    try:
+        similar = get_similar_periods(n=n_similar)
+        if not similar:
+            raise HTTPException(status_code=404, detail="No similar historical periods found")
+        returns = get_forward_returns(similar, ticker, horizon_days=horizon)
+        regime = get_macro_fingerprint()
+
+        return {
+            'ticker': ticker,
+            'current_regime': {
+                'label': regime['regime'],
+                'stress_score': regime['overall_stress_score'],
+                'description': regime['regime_description']
+            },
+            'similar_periods': similar[:5],
+            'forward_returns': returns
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error computing outlook for {ticker}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

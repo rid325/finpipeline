@@ -1,6 +1,7 @@
 # src/regime.py
 import pandas as pd
 import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 from src.db import get_connection
 
 # ── indicator metadata ───────────────────────────────────────────────────────
@@ -157,8 +158,132 @@ def build_historical_fingerprints() -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+def get_similar_periods(n: int = 10, as_of_date: str = None) -> list[dict]:
+    """Find the N most similar historical macro environments to today."""
+    current_fp = get_macro_fingerprint(as_of_date=as_of_date)
+    current_vector = np.array(current_fp['fingerprint_vector']).reshape(1, -1)
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT date, regime, overall_stress_score,
+               cpi_percentile, fedfunds_percentile,
+               unrate_percentile, gdp_percentile, t10y2y_percentile
+        FROM macro_fingerprints
+        ORDER BY date ASC
+    """)
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    if not rows:
+        return []
+
+    df = pd.DataFrame(rows, columns=[
+        'date', 'regime', 'overall_stress_score',
+        'CPI', 'FEDFUNDS', 'UNRATE', 'GDP', 'T10Y2Y'
+    ])
+
+    if as_of_date:
+        cutoff = pd.to_datetime(as_of_date)
+        df = df[pd.to_datetime(df['date']) < cutoff]
+    else:
+        df = df.iloc[:-1]
+
+    feature_cols = ['CPI', 'FEDFUNDS', 'UNRATE', 'GDP', 'T10Y2Y']
+    df = df.dropna(subset=feature_cols)
+    historical_matrix = df[feature_cols].values.astype(float)
+
+    similarities = cosine_similarity(current_vector, historical_matrix)[0]
+    df['similarity'] = similarities
+
+    top = df.nlargest(n, 'similarity')
+
+    return [
+        {
+            'date': str(row['date']),
+            'regime': row['regime'],
+            'similarity': round(float(row['similarity']), 4),
+            'stress_score': float(row['overall_stress_score']) if row['overall_stress_score'] else None
+        }
+        for _, row in top.iterrows()
+    ]
+
+
+def get_forward_returns(similar_periods: list[dict], ticker: str, horizon_days: int = 60) -> dict:
+    """For each similar historical period, look up what happened to the stock price afterward."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    forward_returns = []
+
+    for period in similar_periods:
+        period_date = period['date']
+
+        cursor.execute("""
+            SELECT date, close FROM stock_prices
+            WHERE ticker = %s AND date >= %s
+            ORDER BY date ASC LIMIT 1
+        """, (ticker, period_date))
+        start_row = cursor.fetchone()
+
+        if not start_row:
+            continue
+
+        start_price = float(start_row[1])
+        start_date = start_row[0]
+
+        cursor.execute("""
+            SELECT date, close FROM stock_prices
+            WHERE ticker = %s AND date >= %s
+            ORDER BY date ASC LIMIT 1 OFFSET %s
+        """, (ticker, start_date, horizon_days))
+        end_row = cursor.fetchone()
+
+        if not end_row:
+            continue
+
+        end_price = float(end_row[1])
+        forward_return_pct = ((end_price - start_price) / start_price) * 100
+
+        forward_returns.append({
+            'period': str(period['date']),
+            'similarity': period['similarity'],
+            'start_price': start_price,
+            'end_price': end_price,
+            'forward_return_pct': round(forward_return_pct, 2)
+        })
+
+    cursor.close()
+    conn.close()
+
+    if not forward_returns:
+        return {
+            'ticker': ticker,
+            'horizon_days': horizon_days,
+            'sample_size': 0,
+            'error': 'insufficient historical stock data for these periods'
+        }
+
+    returns = [r['forward_return_pct'] for r in forward_returns]
+
+    return {
+        'ticker': ticker,
+        'horizon_days': horizon_days,
+        'sample_size': len(returns),
+        'median_return_pct': round(float(np.median(returns)), 2),
+        'mean_return_pct': round(float(np.mean(returns)), 2),
+        'best_case_pct': round(float(np.max(returns)), 2),
+        'worst_case_pct': round(float(np.min(returns)), 2),
+        'positive_outcomes': sum(1 for r in returns if r > 0),
+        'negative_outcomes': sum(1 for r in returns if r <= 0),
+        'confidence': 'high' if len(returns) >= 8 else 'medium' if len(returns) >= 4 else 'low',
+        'confidence_note': f'Based on {len(returns)} similar historical periods',
+        'historical_detail': forward_returns
+    }
+
+
 def store_fingerprints():
-    """Build and store all historical fingerprints in the database."""
     df = build_historical_fingerprints()
     conn = get_connection()
     cursor = conn.cursor()
@@ -209,3 +334,17 @@ if __name__ == "__main__":
               f"{data['trend']:<12}  stress={data['stress_level']}")
     print()
     print(f"Fingerprint vector: {fp['fingerprint_vector']}")
+
+    print("\n=== Similar Historical Periods ===")
+    similar = get_similar_periods(n=8)
+    for p in similar:
+        print(f"  {p['date']}  similarity={p['similarity']}  regime={p['regime']}")
+
+    print("\n=== Forward Returns Analysis ===")
+    for ticker in ['AAPL', 'TSLA', 'MSFT']:
+        result = get_forward_returns(similar, ticker, horizon_days=60)
+        print(f"\n{ticker} — {result['horizon_days']}d outlook:")
+        print(f"  Median return:  {result.get('median_return_pct')}%")
+        print(f"  Best case:      {result.get('best_case_pct')}%")
+        print(f"  Worst case:     {result.get('worst_case_pct')}%")
+        print(f"  Confidence:     {result.get('confidence')} ({result.get('confidence_note')})")

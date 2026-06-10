@@ -16,7 +16,8 @@ from src.analytics import (
     get_market_summary
 )
 from src.db import get_connection
-from src.regime import get_macro_fingerprint, get_similar_periods, get_forward_returns
+from src.regime import get_macro_fingerprint, get_similar_periods, get_forward_returns, store_fingerprints
+from src.backtest import run_regime_backtest
 
 
 # ── structured JSON logging ────────────────────────────────────────────────
@@ -61,11 +62,19 @@ def run_macro_pipeline():
 
 
 # ── lifespan: startup + shutdown ───────────────────────────────────────────
+def run_regime_update():
+    """Recompute and store macro fingerprints after new data arrives."""
+    logger.info("Updating macro fingerprints...")
+    store_fingerprints()
+    logger.info("Macro fingerprints updated")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting finpipeline API")
-    scheduler.add_job(run_stock_pipeline, 'cron', hour=18, minute=0)   # 6pm daily
-    scheduler.add_job(run_macro_pipeline, 'cron', day_of_week='mon', hour=9)  # monday 9am
+    scheduler.add_job(run_stock_pipeline, 'cron', hour=18, minute=0)
+    scheduler.add_job(run_macro_pipeline, 'cron', day_of_week='mon', hour=9)
+    scheduler.add_job(run_regime_update, 'cron', hour=19, minute=0)  # after stock pipeline
     scheduler.start()
     logger.info("Scheduler started")
     yield
@@ -337,4 +346,23 @@ def stock_outlook(
         raise
     except Exception as e:
         logger.error(f"Error computing outlook for {ticker}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/analysis/backtest")
+def regime_backtest(
+    ticker: str = Query(description="Stock ticker"),
+    horizon: int = Query(default=60, ge=20, le=120)
+):
+    """
+    Backtest the regime classification against historical stock returns.
+    Shows whether the current regime label has predictive value for this ticker.
+    """
+    ticker = ticker.upper()
+    if ticker not in VALID_TICKERS:
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
+    try:
+        return run_regime_backtest(ticker, horizon_days=horizon)
+    except Exception as e:
+        logger.error(f"Backtest error for {ticker}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

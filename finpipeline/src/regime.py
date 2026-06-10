@@ -234,9 +234,18 @@ def get_forward_returns(similar_periods: list[dict], ticker: str, horizon_days: 
         start_date = start_row[0]
 
         cursor.execute("""
-            SELECT date, close FROM stock_prices
-            WHERE ticker = %s AND date >= %s
-            ORDER BY date ASC LIMIT 1 OFFSET %s
+            WITH ranked AS (
+                SELECT date, close,
+                       ROW_NUMBER() OVER (ORDER BY date ASC) as rn
+                FROM stock_prices
+                WHERE ticker = %s
+            ),
+            start_rn AS (
+                SELECT rn FROM ranked WHERE date = %s
+            )
+            SELECT r.date, r.close
+            FROM ranked r, start_rn s
+            WHERE r.rn = s.rn + %s
         """, (ticker, start_date, horizon_days))
         end_row = cursor.fetchone()
 

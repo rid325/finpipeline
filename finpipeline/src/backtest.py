@@ -28,22 +28,31 @@ def run_regime_backtest(ticker: str, horizon_days: int = 60) -> dict:
     for date_val, regime, stress_score in fingerprint_rows:
         date_str = str(date_val)
 
+        # only use periods where stock data actually exists at that date
         cursor.execute("""
             SELECT date, close FROM stock_prices
-            WHERE ticker = %s AND date >= %s
-            ORDER BY date ASC LIMIT 1
+            WHERE ticker = %s AND date = %s
         """, (ticker, date_str))
-        start_row = cursor.fetchone()
-        if not start_row:
-            continue
+        exact_row = cursor.fetchone()
+        if not exact_row:
+            continue  # skip fingerprint periods with no stock data
 
-        start_price = float(start_row[1])
-        start_date = start_row[0]
+        start_price = float(exact_row[1])
+        start_date = exact_row[0]
 
         cursor.execute("""
-            SELECT close FROM stock_prices
-            WHERE ticker = %s AND date >= %s
-            ORDER BY date ASC LIMIT 1 OFFSET %s
+            WITH ranked AS (
+                SELECT date, close,
+                       ROW_NUMBER() OVER (ORDER BY date ASC) as rn
+                FROM stock_prices
+                WHERE ticker = %s
+            ),
+            start_rn AS (
+                SELECT rn FROM ranked WHERE date = %s
+            )
+            SELECT r.close
+            FROM ranked r, start_rn s
+            WHERE r.rn = s.rn + %s
         """, (ticker, start_date, horizon_days))
         end_row = cursor.fetchone()
         if not end_row:

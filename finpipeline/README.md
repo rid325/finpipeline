@@ -1,72 +1,150 @@
 # finpipeline
 
-A financial data pipeline project built with Python, PostgreSQL, and Poetry.
+A financial data pipeline I built from scratch — pulls real stock and macro data, runs analytics, exposes everything through a REST API, and deploys on Railway with Docker.
+
+The idea was to build something that actually does useful work: fetch data from Yahoo Finance and the FRED API, store it in Postgres, analyse it, and serve it. Not a tutorial project — the data is real, the API is live, and the analysis has genuine signal.
 
 ---
 
-## Questions
+## What it does
 
-### What is Poetry and why is it better than just using pip?
-
-Poetry is a dependency and packaging manager for Python. Unlike pip, it manages both
-dependencies and virtual environments in one tool, and it uses a lock file
-(`poetry.lock`) to pin exact versions of every package — including transitive
-dependencies. This means anyone who clones the project gets the exact same environment.
-With plain pip you'd need to manually maintain `requirements.txt` and a separate tool
-like `venv`, and version conflicts are easy to miss.
-
-### Why does config live in .env and not in config.py directly?
-
-If credentials were hardcoded in `config.py`, they'd end up in version control and
-anyone with access to the repo (or a public GitHub) could read them. `.env` is kept
-out of git via `.gitignore`, so secrets never leave your machine. In production you'd
-set the same variables as server environment variables — the code itself never changes
-between local and production, only the environment does.
-
-### What is a database connection and what does psycopg2.connect() actually do under the hood?
-
-A database connection is a persistent TCP socket between your Python process and the
-Postgres server. When you call `psycopg2.connect()`, the library performs a TCP
-handshake with the server, authenticates using the credentials you provide, and
-negotiates a session. After that, every `cursor.execute()` sends a query over that
-open socket and reads back results. Connections are expensive to open, which is why
-real applications use connection pools rather than opening a new one per query.
-
-### What would happen if you committed .env to a public GitHub repo?
-
-Anyone on the internet could read your database credentials. Automated bots scan
-GitHub continuously for exposed secrets and can exfiltrate or destroy your data within
-minutes of a push. Even if you delete the file in a later commit, the credentials are
-still visible in the git history. You'd need to rotate every secret immediately and
-audit for any unauthorized access.
+- Pulls daily OHLCV stock prices for AAPL, GOOGL, MSFT, TSLA from Yahoo Finance
+- Pulls macro indicators (CPI, Fed Funds Rate, Unemployment, GDP, Yield Curve) from FRED
+- Stores everything in a Postgres database with proper schema and migrations
+- Runs analytics: rolling averages, annualised volatility, market summary
+- Classifies the current macro environment into a regime (expansionary / transitional / contractionary)
+- Finds historical periods that look similar to today using cosine similarity
+- Estimates forward stock returns based on what happened after those similar periods
+- Backtests the regime classification to check whether it actually predicts anything
+- Serves all of this through a FastAPI REST API
+- Runs on a schedule — stock data at 6pm daily, macro data Monday mornings
+- Deployed on Railway with Docker, live at `https://finpipeline-production.up.railway.app`
 
 ---
 
 ## Live API
 
-Deployed on Railway: https://finpipeline-production.up.railway.app
+**Base URL:** `https://finpipeline-production.up.railway.app`
+
+| Endpoint | What it returns |
+|---|---|
+| `GET /health` | API and database status |
+| `GET /metrics` | Row counts, latest data date, pipeline run history |
+| `GET /stocks/summary` | Latest price + 30-day change for all tickers |
+| `GET /stocks/{ticker}/history` | OHLCV data for a date range |
+| `GET /stocks/{ticker}/volatility` | Annualised volatility over N days |
+| `GET /stocks/{ticker}/rolling-average` | Close price with rolling average overlay |
+| `GET /macro/{indicator}` | Economic indicator history |
+| `GET /analysis/regime` | Current macro regime fingerprint |
+| `GET /analysis/outlook?ticker=AAPL` | Forward return estimate based on similar historical periods |
+| `GET /analysis/backtest?ticker=AAPL` | Backtest of regime classification vs actual returns |
+| `GET /pipeline/runs` | History of data fetch runs |
+| `GET /docs` | Interactive API docs (Swagger UI) |
+
+---
+
+## How the macro analysis works
+
+Each month gets a "fingerprint" — a vector of 5 percentile scores, one per indicator. A CPI at the 95th percentile means inflation is higher than 95% of all historical readings. That makes the indicators comparable to each other even though their raw values are on completely different scales.
+
+The engine then classifies each month as one of three regimes:
+- **Expansionary** — low macro stress, generally good for risk assets
+- **Transitional** — mixed signals, some elevated indicators
+- **Contractionary** — high macro stress, elevated inflation or rates or unemployment
+
+To generate an outlook for a stock, it finds the most similar historical months using cosine similarity, then looks up what the stock actually did in the 60 trading days after each of those periods. The backtest endpoint checks whether this approach has real predictive value — spoiler: it does for AAPL, TSLA, and GOOGL, but MSFT tends to be resilient across all regimes.
+
+---
+
+## Project structure
 
 ```
-GET /health
-GET /metrics
-GET /stocks/summary
-GET /stocks/{ticker}/history
-GET /stocks/{ticker}/volatility
-GET /stocks/{ticker}/rolling-average
-GET /macro/{indicator}
-GET /pipeline/runs
-GET /docs
+src/
+├── config.py          # loads env vars, never hardcode credentials
+├── db.py              # postgres connection
+├── analytics.py       # rolling averages, volatility, market summary
+├── regime.py          # macro fingerprinting, similarity search, forward returns
+├── backtest.py        # regime backtest validation
+├── seed.py            # test data
+├── api.py             # FastAPI app, all endpoints, scheduler
+└── fetchers/
+    ├── stock_fetcher.py   # Yahoo Finance → Postgres
+    └── macro_fetcher.py   # FRED API → Postgres
+
+migrations/            # Alembic migration files
+dashboard/
+└── index.html         # frontend dashboard (vanilla JS + Chart.js)
 ```
 
-## Setup
+---
+
+## Running locally
+
+You need Python 3.11+, Poetry, and Postgres running locally.
 
 ```bash
-# Install dependencies
+# install dependencies
 poetry install
 
-# Copy and fill in your credentials
-cp .env.example .env
+# set up your .env (copy from below and fill in your values)
+# DB_HOST=localhost
+# DB_PORT=5432
+# DB_NAME=finpipeline
+# DB_USER=your_username
+# DB_PASSWORD=
+# FRED_API_KEY=your_key_from_fred.stlouisfed.org
 
-# Test the database connection
-poetry run python src/db.py
+# create the database
+psql postgres -c "CREATE DATABASE finpipeline;"
+
+# run migrations
+poetry run alembic upgrade head
+
+# fetch data
+PYTHONPATH=. poetry run python src/fetchers/stock_fetcher.py
+PYTHONPATH=. poetry run python src/fetchers/macro_fetcher.py
+
+# build macro fingerprints
+PYTHONPATH=. poetry run python -c "from src.regime import store_fingerprints; store_fingerprints()"
+
+# start the API
+PYTHONPATH=. poetry run uvicorn src.api:app --host 0.0.0.0 --port 8000
 ```
+
+Open `http://localhost:8000/docs` to explore the API.
+
+---
+
+## Running with Docker
+
+```bash
+# build (run from repo root)
+docker build -t finpipeline -f finpipeline/Dockerfile .
+
+# run (pass your DB credentials as env vars)
+docker run -p 8000:8000 \
+  -e DB_HOST=host.docker.internal \
+  -e DB_PORT=5432 \
+  -e DB_NAME=finpipeline \
+  -e DB_USER=your_username \
+  -e DB_PASSWORD= \
+  -e FRED_API_KEY=your_key \
+  finpipeline
+```
+
+---
+
+## Tech stack
+
+- **Python 3.11** — core language
+- **FastAPI** — REST API framework
+- **PostgreSQL** — database
+- **psycopg2** — postgres driver
+- **Alembic** — database migrations
+- **yfinance** — Yahoo Finance data
+- **pandas / numpy** — data processing
+- **scikit-learn** — cosine similarity for regime matching
+- **APScheduler** — scheduled pipeline jobs
+- **Poetry** — dependency management
+- **Docker** — containerisation
+- **Railway** — cloud deployment

@@ -1,8 +1,12 @@
 # src/api.py
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from pydantic import BaseModel
 from datetime import datetime, timedelta
 import time
 import logging
@@ -18,6 +22,9 @@ from src.analytics import (
 from src.db import get_connection
 from src.regime import get_macro_fingerprint, get_similar_periods, get_forward_returns, store_fingerprints
 from src.backtest import run_regime_backtest
+from src.auth import verify_password, create_access_token, get_current_user, USERS
+from src.fetchers.stock_fetcher import fetch_and_store_stocks
+from src.fetchers.macro_fetcher import fetch_and_store_indicators
 
 
 # ── structured JSON logging ────────────────────────────────────────────────
@@ -35,7 +42,6 @@ handler.setFormatter(JSONFormatter())
 logging.basicConfig(level=logging.INFO, handlers=[handler])
 logger = logging.getLogger(__name__)
 
-# valid tickers and indicators your API supports
 VALID_TICKERS = {'AAPL', 'GOOGL', 'MSFT', 'TSLA'}
 VALID_INDICATORS = {'CPI', 'FEDFUNDS', 'UNRATE', 'GDP', 'T10Y2Y'}
 
@@ -44,7 +50,6 @@ scheduler = AsyncIOScheduler()
 
 # ── scheduled pipeline jobs ────────────────────────────────────────────────
 def run_stock_pipeline():
-    """Fetch last 7 days of stock data."""
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
     logger.info("Scheduled stock pipeline starting...")
@@ -53,7 +58,6 @@ def run_stock_pipeline():
 
 
 def run_macro_pipeline():
-    """Fetch latest macro data."""
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
     logger.info("Scheduled macro pipeline starting...")
@@ -61,9 +65,7 @@ def run_macro_pipeline():
     logger.info(f"Scheduled macro pipeline done: {result['total_inserted']} records")
 
 
-# ── lifespan: startup + shutdown ───────────────────────────────────────────
 def run_regime_update():
-    """Recompute and store macro fingerprints after new data arrives."""
     logger.info("Updating macro fingerprints...")
     store_fingerprints()
     logger.info("Macro fingerprints updated")
@@ -74,7 +76,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting finpipeline API")
     scheduler.add_job(run_stock_pipeline, 'cron', hour=18, minute=0)
     scheduler.add_job(run_macro_pipeline, 'cron', day_of_week='mon', hour=9)
-    scheduler.add_job(run_regime_update, 'cron', hour=19, minute=0)  # after stock pipeline
+    scheduler.add_job(run_regime_update, 'cron', hour=19, minute=0)
     scheduler.start()
     logger.info("Scheduler started")
     yield
@@ -89,7 +91,11 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# allow browser requests (needed when you add a frontend later)
+# ── rate limiter ───────────────────────────────────────────────────────────
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -98,7 +104,7 @@ app.add_middleware(
 )
 
 
-# ── middleware: log every request with timing ──────────────────────────────
+# ── request logging middleware ─────────────────────────────────────────────
 @app.middleware("http")
 async def log_requests(request, call_next):
     start = time.time()
@@ -108,7 +114,29 @@ async def log_requests(request, call_next):
     return response
 
 
-# ── health check ───────────────────────────────────────────────────────────
+# ── auth endpoints (public) ────────────────────────────────────────────────
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/auth/login")
+def login(request: LoginRequest):
+    """Get a JWT token. Pass it as Authorization: Bearer <token> on protected endpoints."""
+    user = USERS.get(request.username)
+    if not user or not verify_password(request.password, user["hashed_password"]):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = create_access_token({"sub": request.username})
+    return {"access_token": token, "token_type": "bearer"}
+
+
+@app.get("/auth/me")
+def me(current_user: str = Depends(get_current_user)):
+    """Verify your token and see who you're authenticated as."""
+    return {"username": current_user}
+
+
+# ── public endpoints ───────────────────────────────────────────────────────
 @app.get("/health")
 def health_check():
     """Check if API and database are reachable."""
@@ -120,7 +148,6 @@ def health_check():
         raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
 
 
-# ── metrics ────────────────────────────────────────────────────────────────
 @app.get("/metrics")
 def metrics():
     """Basic API and pipeline health metrics."""
@@ -136,22 +163,16 @@ def metrics():
 
         cursor.execute("""
             SELECT source, MAX(completed_at) as last_run, SUM(records_fetched) as total_fetched
-            FROM pipeline_runs
-            WHERE status = 'success'
-            GROUP BY source
+            FROM pipeline_runs WHERE status = 'success' GROUP BY source
         """)
         pipeline_stats = [
-            {
-                'source': row[0],
-                'last_successful_run': str(row[1]) if row[1] else None,
-                'total_records_fetched': int(row[2])
-            }
+            {'source': row[0], 'last_successful_run': str(row[1]) if row[1] else None,
+             'total_records_fetched': int(row[2])}
             for row in cursor.fetchall()
         ]
 
         cursor.execute("SELECT MAX(date) FROM stock_prices")
         latest_stock_date = cursor.fetchone()[0]
-
         cursor.close()
         conn.close()
 
@@ -168,20 +189,27 @@ def metrics():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# ── stock endpoints ────────────────────────────────────────────────────────
+@app.get("/stocks/summary")
+def market_summary():
+    """Latest price and 30-day change for all tracked tickers."""
+    try:
+        data = get_market_summary(list(VALID_TICKERS))
+        return {"count": len(data), "data": data}
+    except Exception as e:
+        logger.error(f"Error fetching market summary: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @app.get("/stocks/{ticker}/history")
 def price_history(
     ticker: str,
-    start_date: str = Query(default="2024-01-01", description="Start date YYYY-MM-DD"),
-    end_date: str = Query(default="2024-06-01", description="End date YYYY-MM-DD")
+    start_date: str = Query(default="2024-01-01"),
+    end_date: str = Query(default="2024-06-01")
 ):
     """OHLCV price history for a ticker."""
     ticker = ticker.upper()
     if ticker not in VALID_TICKERS:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Ticker {ticker} not found. Valid tickers: {sorted(VALID_TICKERS)}"
-        )
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found. Valid: {sorted(VALID_TICKERS)}")
     try:
         data = get_price_history(ticker, start_date, end_date)
         if not data:
@@ -197,7 +225,7 @@ def price_history(
 @app.get("/stocks/{ticker}/rolling-average")
 def rolling_average(
     ticker: str,
-    window: int = Query(default=30, ge=2, le=200, description="Rolling window in days")
+    window: int = Query(default=30, ge=2, le=200)
 ):
     """Closing price with rolling average overlay."""
     ticker = ticker.upper()
@@ -214,32 +242,19 @@ def rolling_average(
 @app.get("/stocks/{ticker}/volatility")
 def volatility(
     ticker: str,
-    days: int = Query(default=30, ge=5, le=365, description="Lookback period in days")
+    days: int = Query(default=30, ge=5, le=365)
 ):
     """Annualized volatility for a ticker."""
     ticker = ticker.upper()
     if ticker not in VALID_TICKERS:
         raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
     try:
-        data = get_volatility(ticker, days)
-        return data
+        return get_volatility(ticker, days)
     except Exception as e:
         logger.error(f"Error calculating volatility for {ticker}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@app.get("/stocks/summary")
-def market_summary():
-    """Latest price and 30-day change for all tracked tickers."""
-    try:
-        data = get_market_summary(list(VALID_TICKERS))
-        return {"count": len(data), "data": data}
-    except Exception as e:
-        logger.error(f"Error fetching market summary: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-# ── macro endpoints ────────────────────────────────────────────────────────
 @app.get("/macro/{indicator}")
 def indicator_history(
     indicator: str,
@@ -249,10 +264,7 @@ def indicator_history(
     """Economic indicator history."""
     indicator = indicator.upper()
     if indicator not in VALID_INDICATORS:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Indicator {indicator} not found. Valid: {sorted(VALID_INDICATORS)}"
-        )
+        raise HTTPException(status_code=404, detail=f"Indicator {indicator} not found. Valid: {sorted(VALID_INDICATORS)}")
     try:
         data = get_indicator_history(indicator, start_date, end_date)
         if not data:
@@ -265,7 +277,6 @@ def indicator_history(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-# ── pipeline status ────────────────────────────────────────────────────────
 @app.get("/pipeline/runs")
 def pipeline_runs(limit: int = Query(default=10, ge=1, le=100)):
     """Recent pipeline run history."""
@@ -274,26 +285,17 @@ def pipeline_runs(limit: int = Query(default=10, ge=1, le=100)):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT id, source, status, records_fetched, error_message, started_at, completed_at
-            FROM pipeline_runs
-            ORDER BY started_at DESC
-            LIMIT %s
+            FROM pipeline_runs ORDER BY started_at DESC LIMIT %s
         """, (limit,))
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
-
         return {
             "count": len(rows),
             "runs": [
-                {
-                    "id": row[0],
-                    "source": row[1],
-                    "status": row[2],
-                    "records_fetched": row[3],
-                    "error_message": row[4],
-                    "started_at": str(row[5]),
-                    "completed_at": str(row[6]) if row[6] else None
-                }
+                {"id": row[0], "source": row[1], "status": row[2], "records_fetched": row[3],
+                 "error_message": row[4], "started_at": str(row[5]),
+                 "completed_at": str(row[6]) if row[6] else None}
                 for row in rows
             ]
         }
@@ -301,10 +303,11 @@ def pipeline_runs(limit: int = Query(default=10, ge=1, le=100)):
         logger.error(f"Error fetching pipeline runs: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-# ── analysis endpoints ─────────────────────────────────────────────────────
+
+# ── protected analysis endpoints ───────────────────────────────────────────
 @app.get("/analysis/regime")
-def current_regime():
-    """Current macro regime fingerprint."""
+def current_regime(current_user: str = Depends(get_current_user)):
+    """Current macro regime fingerprint. Requires auth."""
     try:
         return get_macro_fingerprint()
     except Exception as e:
@@ -313,15 +316,15 @@ def current_regime():
 
 
 @app.get("/analysis/outlook")
+@limiter.limit("10/minute")
 def stock_outlook(
+    request: Request,
     ticker: str = Query(description="Stock ticker e.g. AAPL"),
-    horizon: int = Query(default=60, ge=20, le=120, description="Forward horizon in trading days"),
-    n_similar: int = Query(default=8, ge=3, le=20, description="Number of similar periods to use")
+    horizon: int = Query(default=60, ge=20, le=120),
+    n_similar: int = Query(default=8, ge=3, le=20),
+    current_user: str = Depends(get_current_user)
 ):
-    """
-    Given the current macro environment, find historically similar periods
-    and return how the stock performed in the following horizon days.
-    """
+    """Forward return estimate based on similar historical macro periods. Requires auth."""
     ticker = ticker.upper()
     if ticker not in VALID_TICKERS:
         raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
@@ -331,7 +334,6 @@ def stock_outlook(
             raise HTTPException(status_code=404, detail="No similar historical periods found")
         returns = get_forward_returns(similar, ticker, horizon_days=horizon)
         regime = get_macro_fingerprint()
-
         return {
             'ticker': ticker,
             'current_regime': {
@@ -350,14 +352,14 @@ def stock_outlook(
 
 
 @app.get("/analysis/backtest")
+@limiter.limit("5/minute")
 def regime_backtest(
+    request: Request,
     ticker: str = Query(description="Stock ticker"),
-    horizon: int = Query(default=60, ge=20, le=120)
+    horizon: int = Query(default=60, ge=20, le=120),
+    current_user: str = Depends(get_current_user)
 ):
-    """
-    Backtest the regime classification against historical stock returns.
-    Shows whether the current regime label has predictive value for this ticker.
-    """
+    """Backtest regime classification vs actual returns. Requires auth."""
     ticker = ticker.upper()
     if ticker not in VALID_TICKERS:
         raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")

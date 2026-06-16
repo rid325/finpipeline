@@ -25,6 +25,7 @@ from src.backtest import run_regime_backtest
 from src.auth import verify_password, create_access_token, get_current_user, USERS
 from src.fetchers.stock_fetcher import fetch_and_store_stocks
 from src.fetchers.macro_fetcher import fetch_and_store_indicators
+from src.validators import validate_date, validate_date_range, validate_ticker
 
 
 # ── structured JSON logging ────────────────────────────────────────────────
@@ -145,7 +146,8 @@ def health_check():
         conn.close()
         return {"status": "healthy", "database": "connected"}
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Database unavailable: {e}")
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(status_code=503, detail="Database unavailable")
 
 
 @app.get("/metrics")
@@ -204,12 +206,14 @@ def market_summary():
 def price_history(
     ticker: str,
     start_date: str = Query(default="2024-01-01"),
-    end_date: str = Query(default="2024-06-01")
+    end_date: str = Query(default="2024-06-01"),
+    current_user: str = Depends(get_current_user)
 ):
-    """OHLCV price history for a ticker."""
-    ticker = ticker.upper()
-    if ticker not in VALID_TICKERS:
-        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found. Valid: {sorted(VALID_TICKERS)}")
+    """OHLCV price history for a ticker. Requires auth."""
+    ticker = validate_ticker(ticker, VALID_TICKERS)
+    validate_date(start_date, "start_date")
+    validate_date(end_date, "end_date")
+    validate_date_range(start_date, end_date)
     try:
         data = get_price_history(ticker, start_date, end_date)
         if not data:
@@ -228,9 +232,7 @@ def rolling_average(
     window: int = Query(default=30, ge=2, le=200)
 ):
     """Closing price with rolling average overlay."""
-    ticker = ticker.upper()
-    if ticker not in VALID_TICKERS:
-        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
+    ticker = validate_ticker(ticker, VALID_TICKERS)
     try:
         data = get_rolling_average(ticker, window)
         return {"ticker": ticker, "window": window, "count": len(data), "data": data}
@@ -245,9 +247,7 @@ def volatility(
     days: int = Query(default=30, ge=5, le=365)
 ):
     """Annualized volatility for a ticker."""
-    ticker = ticker.upper()
-    if ticker not in VALID_TICKERS:
-        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
+    ticker = validate_ticker(ticker, VALID_TICKERS)
     try:
         return get_volatility(ticker, days)
     except Exception as e:
@@ -265,6 +265,9 @@ def indicator_history(
     indicator = indicator.upper()
     if indicator not in VALID_INDICATORS:
         raise HTTPException(status_code=404, detail=f"Indicator {indicator} not found. Valid: {sorted(VALID_INDICATORS)}")
+    validate_date(start_date, "start_date")
+    validate_date(end_date, "end_date")
+    validate_date_range(start_date, end_date)
     try:
         data = get_indicator_history(indicator, start_date, end_date)
         if not data:
@@ -325,9 +328,7 @@ def stock_outlook(
     current_user: str = Depends(get_current_user)
 ):
     """Forward return estimate based on similar historical macro periods. Requires auth."""
-    ticker = ticker.upper()
-    if ticker not in VALID_TICKERS:
-        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
+    ticker = validate_ticker(ticker, VALID_TICKERS)
     try:
         similar = get_similar_periods(n=n_similar)
         if not similar:
@@ -360,9 +361,7 @@ def regime_backtest(
     current_user: str = Depends(get_current_user)
 ):
     """Backtest regime classification vs actual returns. Requires auth."""
-    ticker = ticker.upper()
-    if ticker not in VALID_TICKERS:
-        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
+    ticker = validate_ticker(ticker, VALID_TICKERS)
     try:
         return run_regime_backtest(ticker, horizon_days=horizon)
     except Exception as e:

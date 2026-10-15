@@ -13,10 +13,17 @@ load_dotenv(find_dotenv(), override=True)
 # access to the values within the .ini file in use.
 config = context.config
 
-config.set_main_option(
-    "sqlalchemy.url",
-    f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_NAME')}"
-)
+database_url = os.getenv("DATABASE_URL")
+if not database_url:
+    database_url = (
+        f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD', '')}"
+        f"@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}"
+        f"/{os.getenv('DB_NAME', 'finpipeline')}"
+    )
+
+# Alembic's ConfigParser treats percent signs in URL-encoded passwords as
+# interpolation markers, so they must be escaped before setting the option.
+config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

@@ -20,8 +20,8 @@ COPY finpipeline/src/ ./src/
 COPY finpipeline/migrations/ ./migrations/
 COPY finpipeline/alembic.ini ./
 
-# expose port 8000
+# Railway supplies PORT at runtime; 8000 remains the local default.
 EXPOSE 8000
 
-# command to run when container starts
-CMD ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell expansion is intentional so Railway's assigned PORT is respected.
+CMD ["sh", "-c", "uvicorn src.api:app --host 0.0.0.0 --port ${PORT:-8000}"]

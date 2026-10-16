@@ -17,11 +17,13 @@ RUN poetry config virtualenvs.create false \
 
 # copy the rest of your code
 COPY finpipeline/src/ ./src/
+COPY finpipeline/dashboard/ ./dashboard/
 COPY finpipeline/migrations/ ./migrations/
 COPY finpipeline/alembic.ini ./
 
 # Railway supplies PORT at runtime; 8000 remains the local default.
 EXPOSE 8000
 
-# Shell expansion is intentional so Railway's assigned PORT is respected.
-CMD ["sh", "-c", "uvicorn src.api:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Apply schema changes on every cold start, then launch the API. Shell expansion
+# is intentional so Railway, Render, Koyeb, and similar hosts can supply PORT.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn src.api:app --host 0.0.0.0 --port ${PORT:-8000}"]

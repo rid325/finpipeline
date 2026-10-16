@@ -2,17 +2,18 @@
 
 FinPipeline is a production-oriented financial data pipeline and analytics API. It ingests market data from Yahoo Finance and macroeconomic series from FRED, stores them in PostgreSQL, and exposes analytics, regime classification, similarity search, and backtesting through FastAPI.
 
-> **Deployment status:** the previous Railway service is offline. The repository is deployment-ready, but no live URL is claimed until a replacement service is verified.
+> **Live deployment:** [Dashboard](https://finpipeline.onrender.com) · [Swagger docs](https://finpipeline.onrender.com/docs) · [Health](https://finpipeline.onrender.com/health)
 
 ## Highlights
 
 - Scheduled stock and macro ingestion with auditable pipeline runs
+- Responsive live dashboard with equity, volatility, macro, and pipeline charts
 - Rolling averages, annualized volatility, and market summaries
 - Macro regime fingerprints and cosine-similarity historical search
 - Forward-return analysis and regime backtesting
 - PostgreSQL migrations with Alembic
 - JWT authentication, input validation, rate limiting, and structured logs
-- Docker and Railway configuration with runtime port and `DATABASE_URL` support
+- Portable Docker deployment with runtime port and `DATABASE_URL` support
 
 ## Architecture
 
@@ -24,11 +25,15 @@ FRED API ──────┘
 
 The application source, detailed API reference, dashboard, and full local setup guide are in [`finpipeline/`](finpipeline/README.md).
 
-## Deploying on Railway
+## Deployment
+
+The verified public service runs on Render's free web-service tier in Singapore. It applies Alembic migrations before startup, bootstraps one year of stock history, and loads five years of macro history from FRED when connected to a fresh database. Free instances can take about a minute to wake after inactivity.
+
+### Deploying on Railway
 
 1. Create a Railway project from this repository and add a PostgreSQL service.
 2. Set `DATABASE_URL` to the PostgreSQL reference variable exposed by Railway.
-3. Add `SECRET_KEY`, `FRED_API_KEY`, `AUTH_USERNAME`, and `AUTH_PASSWORD` as service variables.
+3. Add `SECRET_KEY`, `AUTH_USERNAME`, and `AUTH_PASSWORD` as service variables. `FRED_API_KEY` is optional because the app falls back to FRED's public CSV feed.
 4. Deploy. `railway.toml` runs migrations before startup and binds Uvicorn to Railway's assigned `PORT`.
 5. Verify `/health` and `/docs`, then add the confirmed public URL to this README.
 

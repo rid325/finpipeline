@@ -1,6 +1,7 @@
 # src/api.py
 from fastapi import FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -11,6 +12,7 @@ from datetime import datetime, timedelta
 import time
 import logging
 import json
+from pathlib import Path
 
 from src.analytics import (
     get_price_history,
@@ -47,6 +49,7 @@ VALID_TICKERS = {'AAPL', 'GOOGL', 'MSFT', 'TSLA'}
 VALID_INDICATORS = {'CPI', 'FEDFUNDS', 'UNRATE', 'GDP', 'T10Y2Y'}
 
 scheduler = AsyncIOScheduler()
+DASHBOARD_PATH = Path(__file__).resolve().parent.parent / "dashboard" / "index.html"
 
 
 # ── scheduled pipeline jobs ────────────────────────────────────────────────
@@ -56,6 +59,54 @@ def run_stock_pipeline():
     logger.info("Scheduled stock pipeline starting...")
     result = fetch_and_store_stocks(['AAPL', 'GOOGL', 'MSFT', 'TSLA'], start, end)
     logger.info(f"Scheduled stock pipeline done: {result['total_inserted']} records, errors: {result['errors'] or 'none'}")
+
+
+def seed_stock_history_if_empty():
+    """Populate missing tickers without delaying API startup."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT DISTINCT ticker FROM stock_prices")
+        present_tickers = {row[0] for row in cursor.fetchall()}
+        missing_tickers = sorted(VALID_TICKERS - present_tickers)
+        if not missing_tickers:
+            logger.info("Stock history already present; skipping bootstrap ingestion")
+            return
+    finally:
+        cursor.close()
+        conn.close()
+
+    end = datetime.now().strftime('%Y-%m-%d')
+    start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    logger.info(f"Bootstrapping missing stock history for: {missing_tickers}")
+    result = fetch_and_store_stocks(missing_tickers, start, end)
+    logger.info(
+        f"Bootstrap stock ingestion done: {result['total_inserted']} records, "
+        f"errors: {result['errors'] or 'none'}"
+    )
+
+
+def seed_macro_history_if_empty():
+    """Populate five years of macro history using FRED API or its CSV feed."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM economic_indicators")
+        if cursor.fetchone()[0] > 0:
+            logger.info("Macro history already present; skipping bootstrap ingestion")
+            return
+    finally:
+        cursor.close()
+        conn.close()
+
+    end = datetime.now().strftime('%Y-%m-%d')
+    start = (datetime.now() - timedelta(days=365 * 5)).strftime('%Y-%m-%d')
+    logger.info("Fresh database detected; bootstrapping five years of macro history")
+    result = fetch_and_store_indicators(start, end)
+    logger.info(
+        f"Bootstrap macro ingestion done: {result['total_inserted']} records, "
+        f"errors: {result['errors'] or 'none'}"
+    )
 
 
 def run_macro_pipeline():
@@ -78,6 +129,27 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(run_stock_pipeline, 'cron', hour=18, minute=0)
     scheduler.add_job(run_macro_pipeline, 'cron', day_of_week='mon', hour=9)
     scheduler.add_job(run_regime_update, 'cron', hour=19, minute=0)
+    scheduler.add_job(
+        seed_stock_history_if_empty,
+        'date',
+        run_date=datetime.now() + timedelta(seconds=5),
+        id='bootstrap-stocks',
+        replace_existing=True
+    )
+    scheduler.add_job(
+        seed_macro_history_if_empty,
+        'date',
+        run_date=datetime.now() + timedelta(seconds=15),
+        id='bootstrap-macro',
+        replace_existing=True
+    )
+    scheduler.add_job(
+        run_regime_update,
+        'date',
+        run_date=datetime.now() + timedelta(seconds=90),
+        id='bootstrap-regimes',
+        replace_existing=True
+    )
     scheduler.start()
     logger.info("Scheduler started")
     yield
@@ -138,6 +210,24 @@ def me(current_user: str = Depends(get_current_user)):
 
 
 # ── public endpoints ───────────────────────────────────────────────────────
+@app.get("/")
+def service_info():
+    """Serve the live dashboard at the public deployment URL."""
+    return FileResponse(DASHBOARD_PATH)
+
+
+@app.get("/api")
+def api_info():
+    """Machine-readable service discovery response."""
+    return {
+        "service": "FinPipeline",
+        "status": "online",
+        "description": "Financial data pipeline and analytics API",
+        "health": "/health",
+        "documentation": "/docs"
+    }
+
+
 @app.get("/health")
 def health_check():
     """Check if API and database are reachable."""

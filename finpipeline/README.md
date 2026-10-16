@@ -1,6 +1,6 @@
 # finpipeline
 
-A financial data pipeline I built from scratch — pulls real stock and macro data, runs analytics, exposes everything through a REST API, and is packaged for Railway with Docker.
+A financial data pipeline I built from scratch — pulls real stock and macro data, runs analytics, exposes everything through a REST API, and is packaged for portable Docker deployment.
 
 The idea was to build something that actually does useful work: fetch data from Yahoo Finance and the FRED API, store it in Postgres, analyse it, and serve it. The data is real and the analysis is designed to be testable rather than presented as a toy calculation.
 
@@ -18,18 +18,21 @@ The idea was to build something that actually does useful work: fetch data from 
 - Backtests the regime classification to check whether it actually predicts anything
 - Serves all of this through a FastAPI REST API with JWT authentication and rate limiting
 - Runs on a schedule — stock data at 6pm daily, macro data Monday mornings
-- Ready to deploy on Railway with Docker and PostgreSQL
+- Includes a responsive live dashboard backed by the API
+- Deployable on Render, Railway, or any Docker host with PostgreSQL
 
 ---
 
 ## API
 
-> **Deployment status:** the previous Railway service is offline. A new public URL will be added only after the replacement deployment passes `/health` and endpoint checks.
+> **Live deployment:** [Dashboard](https://finpipeline.onrender.com) · [Swagger docs](https://finpipeline.onrender.com/docs) · [Health](https://finpipeline.onrender.com/health)
 
 ### Public endpoints
 
 | Endpoint | What it returns |
 |---|---|
+| `GET /` | Live visual market and pipeline dashboard |
+| `GET /api` | Machine-readable service metadata |
 | `GET /health` | API and database status |
 | `GET /metrics` | Row counts, latest data date, pipeline run history |
 | `GET /stocks/summary` | Latest price + 30-day change for all tickers |
@@ -138,6 +141,7 @@ poetry install --no-root
 # DB_USER=your_username
 # DB_PASSWORD=
 # Alternatively, set DATABASE_URL instead of the five DB_* variables.
+# Optional: without a key, macro data uses FRED's public CSV feed.
 # FRED_API_KEY=your_key_from_fred.stlouisfed.org
 # SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 # AUTH_USERNAME=choose_a_username
@@ -179,7 +183,7 @@ docker run -p 8000:8000 \
   -e DB_NAME=finpipeline \
   -e DB_USER=your_username \
   -e DB_PASSWORD= \
-  -e FRED_API_KEY=your_key \
+  -e FRED_API_KEY=your_optional_key \
   -e SECRET_KEY=your_secret_key \
   -e AUTH_USERNAME=your_username \
   -e AUTH_PASSWORD=your_strong_password \

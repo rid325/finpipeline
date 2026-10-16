@@ -29,6 +29,7 @@ from src.fetchers.stock_fetcher import fetch_and_store_stocks
 from src.fetchers.macro_fetcher import fetch_and_store_indicators
 from src.validators import validate_date, validate_date_range, validate_ticker
 from src.config import ENABLE_APSCHEDULER
+from src.instruments import list_instruments, list_macro_series
 
 
 # ── structured JSON logging ────────────────────────────────────────────────
@@ -46,9 +47,6 @@ handler.setFormatter(JSONFormatter())
 logging.basicConfig(level=logging.INFO, handlers=[handler])
 logger = logging.getLogger(__name__)
 
-VALID_TICKERS = {'AAPL', 'GOOGL', 'MSFT', 'TSLA'}
-VALID_INDICATORS = {'CPI', 'FEDFUNDS', 'UNRATE', 'GDP', 'T10Y2Y'}
-
 scheduler = AsyncIOScheduler()
 DASHBOARD_PATH = Path(__file__).resolve().parent.parent / "dashboard" / "index.html"
 
@@ -58,8 +56,10 @@ def run_stock_pipeline():
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
     logger.info("Scheduled stock pipeline starting...")
+    instruments = list_instruments()
     result = fetch_and_store_stocks(
-        ['AAPL', 'GOOGL', 'MSFT', 'TSLA'], start, end, job_name="market-global"
+        [item['ticker'] for item in instruments], start, end, job_name="market-all",
+        timezones={item['ticker']: item['timezone'] for item in instruments}
     )
     logger.info(f"Scheduled stock pipeline done: {result['total_inserted']} records, errors: {result['errors'] or 'none'}")
 
@@ -71,7 +71,8 @@ def seed_stock_history_if_empty():
     try:
         cursor.execute("SELECT DISTINCT ticker FROM stock_prices")
         present_tickers = {row[0] for row in cursor.fetchall()}
-        missing_tickers = sorted(VALID_TICKERS - present_tickers)
+        registry = {item['ticker']: item for item in list_instruments()}
+        missing_tickers = sorted(set(registry) - present_tickers)
         if not missing_tickers:
             logger.info("Stock history already present; skipping bootstrap ingestion")
             return
@@ -83,7 +84,8 @@ def seed_stock_history_if_empty():
     start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
     logger.info(f"Bootstrapping missing stock history for: {missing_tickers}")
     result = fetch_and_store_stocks(
-        missing_tickers, start, end, job_name="market-bootstrap"
+        missing_tickers, start, end, job_name="market-bootstrap",
+        timezones={ticker: registry[ticker]['timezone'] for ticker in missing_tickers}
     )
     logger.info(
         f"Bootstrap stock ingestion done: {result['total_inserted']} records, "
@@ -118,7 +120,7 @@ def run_macro_pipeline():
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
     logger.info("Scheduled macro pipeline starting...")
-    result = fetch_and_store_indicators(start, end, job_name="macro-us")
+    result = fetch_and_store_indicators(start, end, job_name="macro-all")
     logger.info(f"Scheduled macro pipeline done: {result['total_inserted']} records")
 
 
@@ -285,14 +287,31 @@ def metrics():
 
 
 @app.get("/stocks/summary")
-def market_summary():
+def market_summary(market: str = Query(default="india", pattern="^(india|global)$")):
     """Latest price and 30-day change for all tracked tickers."""
     try:
-        data = get_market_summary(list(VALID_TICKERS))
-        return {"count": len(data), "data": data}
+        instruments = list_instruments(market)
+        metadata = {item['ticker']: item for item in instruments}
+        data = get_market_summary(list(metadata))
+        for row in data:
+            row.update({key: metadata[row['ticker']][key] for key in (
+                'display_name', 'market', 'asset_type', 'currency', 'exchange', 'sector'
+            )})
+        return {"market": market, "count": len(data), "data": data}
     except Exception as e:
         logger.error(f"Error fetching market summary: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/instruments")
+def instruments(market: str = Query(default="india", pattern="^(india|global)$")):
+    """Active instruments from the database-backed registry."""
+    data = list_instruments(market)
+    return {"market": market, "count": len(data), "data": data}
+
+
+def _valid_tickers() -> set[str]:
+    return {item['ticker'] for item in list_instruments()}
 
 
 @app.get("/stocks/{ticker}/history")
@@ -303,7 +322,7 @@ def price_history(
     current_user: str = Depends(get_current_user)
 ):
     """OHLCV price history for a ticker. Requires auth."""
-    ticker = validate_ticker(ticker, VALID_TICKERS)
+    ticker = validate_ticker(ticker, _valid_tickers())
     validate_date(start_date, "start_date")
     validate_date(end_date, "end_date")
     validate_date_range(start_date, end_date)
@@ -325,7 +344,7 @@ def rolling_average(
     window: int = Query(default=30, ge=2, le=200)
 ):
     """Closing price with rolling average overlay."""
-    ticker = validate_ticker(ticker, VALID_TICKERS)
+    ticker = validate_ticker(ticker, _valid_tickers())
     try:
         data = get_rolling_average(ticker, window)
         return {"ticker": ticker, "window": window, "count": len(data), "data": data}
@@ -340,7 +359,7 @@ def volatility(
     days: int = Query(default=30, ge=5, le=365)
 ):
     """Annualized volatility for a ticker."""
-    ticker = validate_ticker(ticker, VALID_TICKERS)
+    ticker = validate_ticker(ticker, _valid_tickers())
     try:
         return get_volatility(ticker, days)
     except Exception as e:
@@ -356,8 +375,9 @@ def indicator_history(
 ):
     """Economic indicator history."""
     indicator = indicator.upper()
-    if indicator not in VALID_INDICATORS:
-        raise HTTPException(status_code=404, detail=f"Indicator {indicator} not found. Valid: {sorted(VALID_INDICATORS)}")
+    series = {item['indicator']: item for item in list_macro_series()}
+    if indicator not in series:
+        raise HTTPException(status_code=404, detail=f"Indicator {indicator} not found. Valid: {sorted(series)}")
     validate_date(start_date, "start_date")
     validate_date(end_date, "end_date")
     validate_date_range(start_date, end_date)
@@ -365,7 +385,7 @@ def indicator_history(
         data = get_indicator_history(indicator, start_date, end_date)
         if not data:
             raise HTTPException(status_code=404, detail="No data found for this date range")
-        return {"indicator": indicator, "count": len(data), "data": data}
+        return {"indicator": indicator, **series[indicator], "count": len(data), "data": data}
     except HTTPException:
         raise
     except Exception as e:
@@ -423,7 +443,7 @@ def stock_outlook(
     current_user: str = Depends(get_current_user)
 ):
     """Forward return estimate based on similar historical macro periods. Requires auth."""
-    ticker = validate_ticker(ticker, VALID_TICKERS)
+    ticker = validate_ticker(ticker, _valid_tickers())
     try:
         similar = get_similar_periods(n=n_similar)
         if not similar:
@@ -456,7 +476,7 @@ def regime_backtest(
     current_user: str = Depends(get_current_user)
 ):
     """Backtest regime classification vs actual returns. Requires auth."""
-    ticker = validate_ticker(ticker, VALID_TICKERS)
+    ticker = validate_ticker(ticker, _valid_tickers())
     try:
         return run_regime_backtest(ticker, horizon_days=horizon)
     except Exception as e:

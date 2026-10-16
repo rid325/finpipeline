@@ -16,6 +16,8 @@ def _connect_once():
     common = {"connect_timeout": DB_CONNECT_TIMEOUT, "application_name": "finpipeline"}
     if DATABASE_URL:
         return psycopg2.connect(_normalized_database_url(DATABASE_URL), **common)
+    if not DB_USER:
+        raise RuntimeError("Set DATABASE_URL or DB_USER in the environment")
     return psycopg2.connect(
         host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER,
         password=DB_PASSWORD, **common

@@ -9,7 +9,7 @@ def get_price_history(ticker: str, start_date: str, end_date: str) -> list[dict]
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT date, open, high, low, close, volume
+        SELECT date, open, high, low, close, adjusted_close, volume
         FROM stock_prices
         WHERE ticker = %s AND date BETWEEN %s AND %s
         ORDER BY date ASC
@@ -26,7 +26,8 @@ def get_price_history(ticker: str, start_date: str, end_date: str) -> list[dict]
             'high': float(row[2]),
             'low': float(row[3]),
             'close': float(row[4]),
-            'volume': int(row[5])
+            'adjusted_close': float(row[5]) if row[5] is not None else float(row[4]),
+            'volume': int(row[6]) if row[6] is not None else None
         }
         for row in rows
     ]
@@ -40,8 +41,8 @@ def get_rolling_average(ticker: str, window: int = 30) -> list[dict]:
     cursor.execute("""
         SELECT
             date,
-            close,
-            AVG(close) OVER (
+            COALESCE(adjusted_close, close),
+            AVG(COALESCE(adjusted_close, close)) OVER (
                 ORDER BY date
                 ROWS BETWEEN %s PRECEDING AND CURRENT ROW
             ) as rolling_avg
@@ -74,7 +75,7 @@ def get_volatility(ticker: str, days: int = 30) -> dict:
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT date, close
+        SELECT date, COALESCE(adjusted_close, close)
         FROM stock_prices
         WHERE ticker = %s
         ORDER BY date DESC
@@ -130,7 +131,7 @@ def get_market_summary(tickers: list[str]) -> list[dict]:
     results = []
     for ticker in tickers:
         cursor.execute("""
-            SELECT date, close
+            SELECT date, COALESCE(adjusted_close, close)
             FROM stock_prices
             WHERE ticker = %s
             ORDER BY date DESC
@@ -149,7 +150,7 @@ def get_market_summary(tickers: list[str]) -> list[dict]:
             'ticker': ticker,
             'latest_price': latest_price,
             'latest_date': str(rows[0][0]),
-            '30d_change_pct': round(change_pct, 2)
+            '30_session_change_pct': round(change_pct, 2)
         })
 
     cursor.close()

@@ -29,10 +29,10 @@ def validate_date_range(start_date: str, end_date: str) -> None:
 def validate_ticker(ticker: str, valid_tickers: set) -> str:
     """Normalizes and validates a ticker symbol."""
     ticker = ticker.upper().strip()
-    if not ticker.isalpha():
+    if not ticker or any(character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.^=-" for character in ticker):
         raise HTTPException(
             status_code=400,
-            detail=f"Ticker must contain only letters, got: {ticker}"
+            detail=f"Ticker contains unsupported characters: {ticker}"
         )
     if ticker not in valid_tickers:
         raise HTTPException(

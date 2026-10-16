@@ -3,6 +3,8 @@ name: Market ingestion
 on:
   workflow_dispatch:
   schedule:
+    # 10:37 UTC is 16:07 IST, safely after the 15:30 NSE close.
+    - cron: "37 10 * * 1-5"
     # 22:37 UTC is after the US close in both daylight and standard time.
     - cron: "37 22 * * 1-5"
 
@@ -25,7 +27,11 @@ jobs:
         env:
           MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
         run: poetry run alembic -c finpipeline/alembic.ini upgrade head
-      - name: Run idempotent market job
+      - name: Run idempotent India market job
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: PYTHONPATH=finpipeline poetry run python -m src.jobs run market
+        run: PYTHONPATH=finpipeline poetry run python -m src.jobs run market --market india
+      - name: Run idempotent global market job
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: PYTHONPATH=finpipeline poetry run python -m src.jobs run market --market global

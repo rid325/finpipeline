@@ -4,6 +4,7 @@ import pandas as pd
 import requests
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from src.db import get_connection
 
 
@@ -19,22 +20,44 @@ def fetch_yahoo_chart_history(ticker: str, start_date: str, end_date: str) -> pd
     )
     response.raise_for_status()
     result = response.json()['chart']['result'][0]
+    exchange_timezone = result.get('meta', {}).get('exchangeTimezoneName', 'UTC')
     timestamps = result.get('timestamp', [])
     quote = result['indicators']['quote'][0]
+    adjusted = result.get('indicators', {}).get('adjclose', [{}])[0].get('adjclose', [])
     rows = []
     for index, timestamp in enumerate(timestamps):
         values = {field: quote[field][index] for field in ('open', 'high', 'low', 'close', 'volume')}
-        if any(value is None for value in values.values()):
+        if any(values[field] is None for field in ('open', 'high', 'low', 'close')):
             continue
         rows.append({
-            'date': datetime.fromtimestamp(timestamp, tz=timezone.utc).date(),
+            'date': datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone(
+                ZoneInfo(exchange_timezone)
+            ).date(),
+            'adj close': adjusted[index] if index < len(adjusted) else values['close'],
             **values
         })
     return pd.DataFrame(rows)
 
 
+def normalize_yahoo_history(df: pd.DataFrame, ticker: str, timezone_name: str) -> pd.DataFrame:
+    """Normalize Yahoo bars while preserving the exchange-local session date."""
+    frame = df.reset_index().copy()
+    frame.columns = [str(column).lower().replace('_', ' ') for column in frame.columns]
+    date_column = 'date' if 'date' in frame.columns else frame.columns[0]
+    dates = pd.to_datetime(frame[date_column])
+    if getattr(dates.dt, 'tz', None) is not None:
+        dates = dates.dt.tz_convert(timezone_name)
+    frame['date'] = dates.dt.date
+    frame['ticker'] = ticker
+    if 'adj close' not in frame.columns:
+        frame['adj close'] = frame['close']
+    frame['adj close'] = frame['adj close'].fillna(frame['close'])
+    return frame
+
+
 def fetch_and_store_stocks(
-    tickers: list[str], start_date: str, end_date: str, job_name: str = "market-global"
+    tickers: list[str], start_date: str, end_date: str, job_name: str = "market-global",
+    timezones: dict[str, str] | None = None,
 ) -> dict:
     """
     Fetches OHLCV data for given tickers and stores in postgres.
@@ -65,7 +88,9 @@ def fetch_and_store_stocks(
             # cookie/crumb flow is rate-limited on hosted infrastructure.
             try:
                 stock = yf.Ticker(ticker)
-                df = stock.history(start=start_date, end=end_date)
+                df = stock.history(
+                    start=start_date, end=end_date, auto_adjust=False, actions=False
+                )
             except Exception as primary_error:
                 print(f"  yfinance failed for {ticker}: {primary_error}; trying chart endpoint")
                 df = fetch_yahoo_chart_history(ticker, start_date, end_date)
@@ -77,37 +102,37 @@ def fetch_and_store_stocks(
                     errors.append(f"{ticker}: no data returned")
                     continue
 
-            # clean the dataframe
-            df = df.reset_index()
-            df.columns = [c.lower() for c in df.columns]
-            df['ticker'] = ticker
-            df['date'] = pd.to_datetime(df['date'], utc=True).dt.date
+            df = normalize_yahoo_history(
+                df, ticker, (timezones or {}).get(ticker, 'UTC')
+            )
 
-            # insert each row
+            cursor.execute("SAVEPOINT instrument_rows")
             for _, row in df.iterrows():
-                try:
-                    cursor.execute("""
-                        INSERT INTO stock_prices (ticker, date, open, high, low, close, volume)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT ON CONSTRAINT uq_ticker_date DO NOTHING
-                    """, (
-                        row['ticker'],
-                        row['date'],
-                        float(row['open']),
-                        float(row['high']),
-                        float(row['low']),
-                        float(row['close']),
-                        int(row['volume'])
-                    ))
-                    total_inserted += cursor.rowcount
-                except Exception as e:
-                    errors.append(f"{ticker} row {row['date']}: {e}")
-                    conn.rollback()
+                prices = [float(row[name]) for name in ('open', 'high', 'low', 'close')]
+                if not all(pd.notna(value) and value >= 0 for value in prices):
+                    raise ValueError(f"invalid OHLC values on {row['date']}")
+                volume = None if pd.isna(row.get('volume')) else int(row['volume'])
+                cursor.execute("""
+                    INSERT INTO stock_prices
+                        (ticker, date, open, high, low, close, adjusted_close, volume)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT ON CONSTRAINT uq_ticker_date DO UPDATE SET
+                        open = EXCLUDED.open, high = EXCLUDED.high,
+                        low = EXCLUDED.low, close = EXCLUDED.close,
+                        adjusted_close = EXCLUDED.adjusted_close,
+                        volume = EXCLUDED.volume, updated_at = NOW()
+                """, (
+                    row['ticker'], row['date'], *prices,
+                    float(row['adj close']), volume
+                ))
+                total_inserted += cursor.rowcount
+            cursor.execute("RELEASE SAVEPOINT instrument_rows")
 
             conn.commit()
             print(f"  {ticker}: {len(df)} rows processed")
 
         except Exception as e:
+            conn.rollback()
             errors.append(f"{ticker}: {e}")
 
     # update pipeline run as completed

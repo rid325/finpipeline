@@ -1,27 +1,34 @@
 """Command-line entrypoints for jobs that must run independently of the web service."""
 import argparse
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import sys
 
 from src.fetchers.macro_fetcher import fetch_and_store_indicators
 from src.fetchers.stock_fetcher import fetch_and_store_stocks
 
 
-GLOBAL_TICKERS = ["AAPL", "GOOGL", "MSFT", "TSLA"]
+from src.instruments import list_instruments
 
 
-def run_market() -> dict:
-    end = datetime.now(timezone.utc).date() + timedelta(days=1)
-    start = end - timedelta(days=10)
+def run_market(market: str = "india", backfill: bool = False) -> dict:
+    instruments = list_instruments(market)
+    timezone_name = "Asia/Kolkata" if market == "india" else "America/New_York"
+    end = datetime.now(ZoneInfo(timezone_name)).date() + timedelta(days=1)
+    start = end - timedelta(days=365 * 5 if backfill else 10)
     return fetch_and_store_stocks(
-        GLOBAL_TICKERS, str(start), str(end), job_name="market-global"
+        [item["ticker"] for item in instruments], str(start), str(end),
+        job_name=f"market-{market}{'-backfill' if backfill else ''}",
+        timezones={item["ticker"]: item["timezone"] for item in instruments},
     )
 
 
-def run_macro() -> dict:
+def run_macro(market: str | None = None) -> dict:
     end = datetime.now(timezone.utc).date()
     start = end - timedelta(days=90)
-    return fetch_and_store_indicators(str(start), str(end), job_name="macro-us")
+    return fetch_and_store_indicators(
+        str(start), str(end), job_name=f"macro-{market or 'all'}", market=market
+    )
 
 
 def run_news() -> dict:
@@ -39,9 +46,16 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Run one FinPipeline job and exit")
     parser.add_argument("command", choices=["run"])
     parser.add_argument("job", choices=sorted(JOBS))
+    parser.add_argument("--market", choices=["india", "global"])
+    parser.add_argument("--backfill", action="store_true")
     args = parser.parse_args(argv)
     try:
-        result = JOBS[args.job]()
+        if args.job == "market":
+            result = run_market(args.market or "india", args.backfill)
+        elif args.job == "macro":
+            result = run_macro(args.market)
+        else:
+            result = JOBS[args.job]()
     except Exception as error:
         print(f"{args.job} job failed: {error}", file=sys.stderr)
         return 1

@@ -19,6 +19,3 @@ AUTH_PASSWORD = os.getenv("AUTH_PASSWORD")
 ENABLE_APSCHEDULER = os.getenv("ENABLE_APSCHEDULER", "false").lower() in {"1", "true", "yes"}
 DB_CONNECT_RETRIES = int(os.getenv("DB_CONNECT_RETRIES", "2"))
 DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "10"))
-
-if not DATABASE_URL and not DB_USER:
-    raise ValueError("Set DATABASE_URL or DB_USER in the environment")

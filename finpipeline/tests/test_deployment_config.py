@@ -94,11 +94,11 @@ def test_job_cli_returns_nonzero_when_a_job_reports_errors(monkeypatch, capsys):
 
     monkeypatch.setitem(
         jobs.JOBS,
-        "market",
+        "news",
         lambda: {"total_inserted": 0, "errors": ["upstream unavailable"]},
     )
 
-    assert jobs.main(["run", "market"]) == 1
+    assert jobs.main(["run", "news"]) == 1
     assert "upstream unavailable" in capsys.readouterr().err
 
 

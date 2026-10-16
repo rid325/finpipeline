@@ -4,17 +4,13 @@ import pandas as pd
 from io import StringIO
 from datetime import datetime, timezone
 import time
+import csv
+from pathlib import Path
 from src.db import get_connection
 from src.config import FRED_API_KEY
+from src.instruments import list_macro_series
 
-# these are real FRED series IDs
-INDICATORS = {
-    'CPI': 'CPIAUCSL',           # consumer price index
-    'FEDFUNDS': 'FEDFUNDS',      # federal funds rate
-    'UNRATE': 'UNRATE',          # unemployment rate
-    'GDP': 'GDP',                # gross domestic product
-    'T10Y2Y': 'T10Y2Y'          # 10yr-2yr treasury spread (recession indicator)
-}
+CURATED_REPO_CSV = Path(__file__).resolve().parents[2] / "data" / "rbi_policy_repo_rate.csv"
 
 
 def fetch_fred_series(series_id: str, start_date: str, end_date: str) -> list:
@@ -73,8 +69,14 @@ def validate_indicator_row(indicator: str, date_str: str, value: float) -> bool:
     return True
 
 
+def load_curated_repo_rows() -> list[tuple[str, float]]:
+    with CURATED_REPO_CSV.open(newline="", encoding="utf-8") as handle:
+        return [(row["date"], float(row["value"])) for row in csv.DictReader(handle)]
+
+
 def fetch_and_store_indicators(
-    start_date: str, end_date: str, job_name: str = "macro-us"
+    start_date: str, end_date: str, job_name: str = "macro-all",
+    market: str | None = None,
 ) -> dict:
     conn = get_connection()
     cursor = conn.cursor()
@@ -92,31 +94,45 @@ def fetch_and_store_indicators(
     total_inserted = 0
     errors = []
 
-    for name, series_id in INDICATORS.items():
+    series_registry = list_macro_series(market)
+    for series in series_registry:
+        name = series["indicator"]
+        series_id = series["series_id"]
         try:
             print(f"Fetching {name} ({series_id})...")
-            observations = fetch_fred_series(series_id, start_date, end_date)
+            observations = (
+                load_curated_repo_rows()
+                if series["manually_curated"]
+                else fetch_fred_series(series_id, start_date, end_date)
+            )
 
+            cursor.execute("SAVEPOINT macro_rows")
             for date_str, value in observations:
                 if not validate_indicator_row(name, date_str, value):
                     errors.append(f"{name} {date_str}: failed validation (value={value})")
                     continue
 
-                try:
-                    cursor.execute("""
-                        INSERT INTO economic_indicators (indicator, date, value)
-                        VALUES (%s, %s, %s)
-                        ON CONFLICT ON CONSTRAINT uq_indicator_date DO NOTHING
-                    """, (name, date_str, value))
-                    total_inserted += cursor.rowcount
-                except Exception as e:
-                    errors.append(f"{name} {date_str}: {e}")
-                    conn.rollback()
+                cursor.execute("""
+                    INSERT INTO economic_indicators
+                        (indicator, date, value, series_id, market, source, manually_curated)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT ON CONSTRAINT uq_indicator_date DO UPDATE SET
+                        value = EXCLUDED.value, series_id = EXCLUDED.series_id,
+                        market = EXCLUDED.market, source = EXCLUDED.source,
+                        manually_curated = EXCLUDED.manually_curated, updated_at = NOW()
+                """, (
+                    name, date_str, value, series_id, series["market"],
+                    series["source"], series["manually_curated"]
+                ))
+                total_inserted += cursor.rowcount
+
+            cursor.execute("RELEASE SAVEPOINT macro_rows")
 
             conn.commit()
             print(f"  {name}: {len(observations)} observations stored")
 
         except Exception as e:
+            conn.rollback()
             errors.append(f"{name}: {e}")
 
     cursor.execute("""

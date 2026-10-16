@@ -21,3 +21,14 @@
 - Seven India FRED series were live-verified. RBI policy repo values are a small manually curated CSV with an official source URL and as-of date on every row.
 - The RBI CSV was chosen over scraping DBIE; the tradeoff is deliberate manual maintenance, which is labeled in both registry and API output.
 - `stock_prices.ticker` and price precision were widened for real Yahoo symbols; a foreign key was deferred to avoid breaking legacy custom rows.
+
+## Phase 2 — Indian market news
+
+- News has a normalized-URL hash constraint plus a conservative title-token similarity check inside 48 hours; tags live in a small indexed join table.
+- Tagging is deterministic word-boundary matching over explicit company, ticker, index, and sector aliases; no sentiment or causal inference is attempted.
+- Move days compare absolute adjusted daily return with twice the trailing 90-session standard deviation, shifted one session to keep today's return out of its threshold.
+- News timestamps stay in UTC; move-day joins convert publication time to each instrument's exchange timezone, including IST for Indian instruments.
+- A 365-day delete runs with ingestion. At roughly 200 short RSS records/day, a conservative 1–2 KB per record plus indexes is about 73–146 MB/year.
+- ET, Mint, and Business Standard feeds were technically verified but require permission for this use; Moneycontrol returned HTTP 403, so all are disabled by default.
+- The scheduled job is still useful and safe: a licensed source can be enabled by feed ID without code changes, and one failing feed produces a partial run rather than discarding others.
+- The requested real 50-headline evaluation was rejected rather than copied against terms; the zero-sample limitation is explicit in `docs/news_tagging_eval.md`.

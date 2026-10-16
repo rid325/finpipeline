@@ -30,6 +30,7 @@ from src.fetchers.macro_fetcher import fetch_and_store_indicators
 from src.validators import validate_date, validate_date_range, validate_ticker
 from src.config import ENABLE_APSCHEDULER
 from src.instruments import list_instruments, list_macro_series
+from src.news import FEEDS, get_move_days, query_news
 
 
 # ── structured JSON logging ────────────────────────────────────────────────
@@ -420,6 +421,42 @@ def pipeline_runs(limit: int = Query(default=10, ge=1, le=100)):
     except Exception as e:
         logger.error(f"Error fetching pipeline runs: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/news")
+def news(
+    ticker: str | None = None,
+    sector: str | None = None,
+    from_date: str | None = Query(default=None, alias="from"),
+    to_date: str | None = Query(default=None, alias="to"),
+    source: str | None = None,
+    limit: int = Query(default=50, ge=1, le=100),
+):
+    """Licensed-opt-in Indian market headlines and deterministic tags."""
+    if from_date:
+        validate_date(from_date, "from")
+    if to_date:
+        validate_date(to_date, "to")
+    data = query_news(ticker, sector, from_date, to_date, source, limit)
+    return {
+        "count": len(data), "data": data,
+        "source_status": {feed: details["status"] for feed, details in FEEDS.items()},
+    }
+
+
+@app.get("/moves")
+def moves(
+    ticker: str = Query(default="^NSEI"),
+    days: int = Query(default=365, ge=30, le=1825),
+):
+    """Move days and same-day tagged headlines; no causal claim is made."""
+    ticker = validate_ticker(ticker, _valid_tickers())
+    data = get_move_days(ticker, days)
+    return {
+        "ticker": ticker, "count": len(data), "data": data,
+        "definition": "absolute daily adjusted return above 2x trailing 90-session standard deviation",
+        "headline_label": "headlines on the day; not evidence of cause",
+    }
 
 
 # ── protected analysis endpoints ───────────────────────────────────────────

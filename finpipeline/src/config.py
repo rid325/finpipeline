@@ -19,3 +19,6 @@ AUTH_PASSWORD = os.getenv("AUTH_PASSWORD")
 ENABLE_APSCHEDULER = os.getenv("ENABLE_APSCHEDULER", "false").lower() in {"1", "true", "yes"}
 DB_CONNECT_RETRIES = int(os.getenv("DB_CONNECT_RETRIES", "2"))
 DB_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "10"))
+NEWS_FEEDS_ENABLED = {
+    item.strip() for item in os.getenv("NEWS_FEEDS_ENABLED", "").split(",") if item.strip()
+}

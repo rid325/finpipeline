@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: finpipeline
+    runtime: docker
+    plan: free
+    dockerfilePath: ./finpipeline/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: MIGRATION_DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ENABLE_APSCHEDULER
+        value: "false"

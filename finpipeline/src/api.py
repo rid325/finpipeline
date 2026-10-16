@@ -28,6 +28,7 @@ from src.auth import verify_password, create_access_token, get_current_user, USE
 from src.fetchers.stock_fetcher import fetch_and_store_stocks
 from src.fetchers.macro_fetcher import fetch_and_store_indicators
 from src.validators import validate_date, validate_date_range, validate_ticker
+from src.config import ENABLE_APSCHEDULER
 
 
 # ── structured JSON logging ────────────────────────────────────────────────
@@ -57,7 +58,9 @@ def run_stock_pipeline():
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
     logger.info("Scheduled stock pipeline starting...")
-    result = fetch_and_store_stocks(['AAPL', 'GOOGL', 'MSFT', 'TSLA'], start, end)
+    result = fetch_and_store_stocks(
+        ['AAPL', 'GOOGL', 'MSFT', 'TSLA'], start, end, job_name="market-global"
+    )
     logger.info(f"Scheduled stock pipeline done: {result['total_inserted']} records, errors: {result['errors'] or 'none'}")
 
 
@@ -79,7 +82,9 @@ def seed_stock_history_if_empty():
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
     logger.info(f"Bootstrapping missing stock history for: {missing_tickers}")
-    result = fetch_and_store_stocks(missing_tickers, start, end)
+    result = fetch_and_store_stocks(
+        missing_tickers, start, end, job_name="market-bootstrap"
+    )
     logger.info(
         f"Bootstrap stock ingestion done: {result['total_inserted']} records, "
         f"errors: {result['errors'] or 'none'}"
@@ -102,7 +107,7 @@ def seed_macro_history_if_empty():
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=365 * 5)).strftime('%Y-%m-%d')
     logger.info("Fresh database detected; bootstrapping five years of macro history")
-    result = fetch_and_store_indicators(start, end)
+    result = fetch_and_store_indicators(start, end, job_name="macro-bootstrap")
     logger.info(
         f"Bootstrap macro ingestion done: {result['total_inserted']} records, "
         f"errors: {result['errors'] or 'none'}"
@@ -113,7 +118,7 @@ def run_macro_pipeline():
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
     logger.info("Scheduled macro pipeline starting...")
-    result = fetch_and_store_indicators(start, end)
+    result = fetch_and_store_indicators(start, end, job_name="macro-us")
     logger.info(f"Scheduled macro pipeline done: {result['total_inserted']} records")
 
 
@@ -126,34 +131,32 @@ def run_regime_update():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting finpipeline API")
-    scheduler.add_job(run_stock_pipeline, 'cron', hour=18, minute=0)
-    scheduler.add_job(run_macro_pipeline, 'cron', day_of_week='mon', hour=9)
-    scheduler.add_job(run_regime_update, 'cron', hour=19, minute=0)
-    scheduler.add_job(
-        seed_stock_history_if_empty,
-        'date',
-        run_date=datetime.now() + timedelta(seconds=5),
-        id='bootstrap-stocks',
-        replace_existing=True
-    )
-    scheduler.add_job(
-        seed_macro_history_if_empty,
-        'date',
-        run_date=datetime.now() + timedelta(seconds=15),
-        id='bootstrap-macro',
-        replace_existing=True
-    )
-    scheduler.add_job(
-        run_regime_update,
-        'date',
-        run_date=datetime.now() + timedelta(seconds=90),
-        id='bootstrap-regimes',
-        replace_existing=True
-    )
-    scheduler.start()
-    logger.info("Scheduler started")
+    if ENABLE_APSCHEDULER:
+        scheduler.add_job(run_stock_pipeline, 'cron', hour=18, minute=0)
+        scheduler.add_job(run_macro_pipeline, 'cron', day_of_week='mon', hour=9)
+        scheduler.add_job(run_regime_update, 'cron', hour=19, minute=0)
+        scheduler.add_job(
+            seed_stock_history_if_empty, 'date',
+            run_date=datetime.now() + timedelta(seconds=5),
+            id='bootstrap-stocks', replace_existing=True
+        )
+        scheduler.add_job(
+            seed_macro_history_if_empty, 'date',
+            run_date=datetime.now() + timedelta(seconds=15),
+            id='bootstrap-macro', replace_existing=True
+        )
+        scheduler.add_job(
+            run_regime_update, 'date',
+            run_date=datetime.now() + timedelta(seconds=90),
+            id='bootstrap-regimes', replace_existing=True
+        )
+        scheduler.start()
+        logger.info("APScheduler started")
+    else:
+        logger.info("APScheduler disabled; external jobs own production schedules")
     yield
-    scheduler.shutdown()
+    if scheduler.running:
+        scheduler.shutdown()
     logger.info("Shutting down finpipeline API")
 
 
@@ -377,7 +380,8 @@ def pipeline_runs(limit: int = Query(default=10, ge=1, le=100)):
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, source, status, records_fetched, error_message, started_at, completed_at
+            SELECT id, source, status, records_fetched, error_message,
+                   started_at, completed_at, job_name, duration_ms
             FROM pipeline_runs ORDER BY started_at DESC LIMIT %s
         """, (limit,))
         rows = cursor.fetchall()
@@ -388,7 +392,8 @@ def pipeline_runs(limit: int = Query(default=10, ge=1, le=100)):
             "runs": [
                 {"id": row[0], "source": row[1], "status": row[2], "records_fetched": row[3],
                  "error_message": row[4], "started_at": str(row[5]),
-                 "completed_at": str(row[6]) if row[6] else None}
+                 "completed_at": str(row[6]) if row[6] else None,
+                 "job_name": row[7], "duration_ms": row[8]}
                 for row in rows
             ]
         }

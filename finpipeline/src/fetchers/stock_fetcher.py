@@ -2,6 +2,7 @@
 import yfinance as yf
 import pandas as pd
 import requests
+import time
 from datetime import datetime, timezone
 from src.db import get_connection
 
@@ -32,7 +33,9 @@ def fetch_yahoo_chart_history(ticker: str, start_date: str, end_date: str) -> pd
     return pd.DataFrame(rows)
 
 
-def fetch_and_store_stocks(tickers: list[str], start_date: str, end_date: str) -> dict:
+def fetch_and_store_stocks(
+    tickers: list[str], start_date: str, end_date: str, job_name: str = "market-global"
+) -> dict:
     """
     Fetches OHLCV data for given tickers and stores in postgres.
     Returns a summary of what happened.
@@ -41,11 +44,13 @@ def fetch_and_store_stocks(tickers: list[str], start_date: str, end_date: str) -
     cursor = conn.cursor()
 
     # log that pipeline started
+    started_at = datetime.now(timezone.utc)
+    started_clock = time.monotonic()
     cursor.execute("""
-        INSERT INTO pipeline_runs (source, status, started_at)
-        VALUES (%s, %s, %s)
+        INSERT INTO pipeline_runs (source, job_name, status, started_at)
+        VALUES (%s, %s, %s, %s)
         RETURNING id
-    """, ('yahoo_finance', 'running', datetime.now()))
+    """, ('yahoo_finance', job_name, 'running', started_at))
     run_id = cursor.fetchone()[0]
     conn.commit()
 
@@ -111,13 +116,15 @@ def fetch_and_store_stocks(tickers: list[str], start_date: str, end_date: str) -
         SET status = %s,
             records_fetched = %s,
             error_message = %s,
-            completed_at = %s
+            completed_at = %s,
+            duration_ms = %s
         WHERE id = %s
     """, (
         'failed' if errors else 'success',
         total_inserted,
         '\n'.join(errors) if errors else None,
-        datetime.now(),
+        datetime.now(timezone.utc),
+        round((time.monotonic() - started_clock) * 1000),
         run_id
     ))
     conn.commit()

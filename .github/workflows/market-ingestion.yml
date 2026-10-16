@@ -1,0 +1,31 @@
+name: Market ingestion
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 22:37 UTC is after the US close in both daylight and standard time.
+    - cron: "37 22 * * 1-5"
+
+concurrency:
+  group: market-ingestion
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pipx install poetry
+      - run: poetry install --no-interaction --no-root
+      - name: Apply migrations using direct Neon connection
+        env:
+          MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
+        run: poetry run alembic -c finpipeline/alembic.ini upgrade head
+      - name: Run idempotent market job
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: PYTHONPATH=finpipeline poetry run python -m src.jobs run market

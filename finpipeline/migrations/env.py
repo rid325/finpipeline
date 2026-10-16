@@ -13,7 +13,7 @@ load_dotenv(find_dotenv(), override=True)
 # access to the values within the .ini file in use.
 config = context.config
 
-database_url = os.getenv("DATABASE_URL")
+database_url = os.getenv("MIGRATION_DATABASE_URL") or os.getenv("DATABASE_URL")
 if not database_url:
     database_url = (
         f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD', '')}"

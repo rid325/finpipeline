@@ -2,7 +2,8 @@
 import requests
 import pandas as pd
 from io import StringIO
-from datetime import datetime
+from datetime import datetime, timezone
+import time
 from src.db import get_connection
 from src.config import FRED_API_KEY
 
@@ -72,15 +73,19 @@ def validate_indicator_row(indicator: str, date_str: str, value: float) -> bool:
     return True
 
 
-def fetch_and_store_indicators(start_date: str, end_date: str) -> dict:
+def fetch_and_store_indicators(
+    start_date: str, end_date: str, job_name: str = "macro-us"
+) -> dict:
     conn = get_connection()
     cursor = conn.cursor()
 
+    started_at = datetime.now(timezone.utc)
+    started_clock = time.monotonic()
     cursor.execute("""
-        INSERT INTO pipeline_runs (source, status, started_at)
-        VALUES (%s, %s, %s)
+        INSERT INTO pipeline_runs (source, job_name, status, started_at)
+        VALUES (%s, %s, %s, %s)
         RETURNING id
-    """, ('fred', 'running', datetime.now()))
+    """, ('fred', job_name, 'running', started_at))
     run_id = cursor.fetchone()[0]
     conn.commit()
 
@@ -117,13 +122,14 @@ def fetch_and_store_indicators(start_date: str, end_date: str) -> dict:
     cursor.execute("""
         UPDATE pipeline_runs
         SET status = %s, records_fetched = %s,
-            error_message = %s, completed_at = %s
+            error_message = %s, completed_at = %s, duration_ms = %s
         WHERE id = %s
     """, (
         'failed' if errors else 'success',
         total_inserted,
         '\n'.join(errors) if errors else None,
-        datetime.now(),
+        datetime.now(timezone.utc),
+        round((time.monotonic() - started_clock) * 1000),
         run_id
     ))
     conn.commit()

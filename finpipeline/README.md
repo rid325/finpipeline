@@ -18,18 +18,21 @@ The idea was to build something that actually does useful work: fetch data from 
 - Backtests the regime classification to check whether it actually predicts anything
 - Serves all of this through a FastAPI REST API with JWT authentication and rate limiting
 - Runs on a schedule — stock data at 6pm daily, macro data Monday mornings
+- Includes a responsive live dashboard backed by the API
 - Deployable on Render, Railway, or any Docker host with PostgreSQL
 
 ---
 
 ## API
 
-> **Live deployment:** [API](https://finpipeline.onrender.com) · [Swagger docs](https://finpipeline.onrender.com/docs) · [Health](https://finpipeline.onrender.com/health)
+> **Live deployment:** [Dashboard](https://finpipeline.onrender.com) · [Swagger docs](https://finpipeline.onrender.com/docs) · [Health](https://finpipeline.onrender.com/health)
 
 ### Public endpoints
 
 | Endpoint | What it returns |
 |---|---|
+| `GET /` | Live visual market and pipeline dashboard |
+| `GET /api` | Machine-readable service metadata |
 | `GET /health` | API and database status |
 | `GET /metrics` | Row counts, latest data date, pipeline run history |
 | `GET /stocks/summary` | Latest price + 30-day change for all tickers |

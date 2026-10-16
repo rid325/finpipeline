@@ -1,271 +1,50 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FinPipeline Dashboard</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="FinPipeline — live market and macroeconomic data infrastructure.">
+  <title>FinPipeline — Live Market Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <style>
-    body { background: #0f172a; color: #e2e8f0; }
-    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; }
-    .stat-value { font-size: 2rem; font-weight: 700; color: #f8fafc; }
-    .positive { color: #22c55e; }
-    .negative { color: #ef4444; }
-    select, button { background: #334155; color: #e2e8f0; border: 1px solid #475569; border-radius: 6px; padding: 6px 12px; }
-    button:hover { background: #475569; cursor: pointer; }
+    :root{--ink:#07120f;--panel:#0b1b17;--panel2:#10241e;--line:rgba(192,255,225,.12);--muted:#8ca49c;--text:#eef8f3;--mint:#6fffc1;--lime:#d7ff72;--orange:#ffad66;--red:#ff7b7b;--mono:"DM Mono",monospace;--sans:"Manrope",sans-serif}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--text);background:radial-gradient(circle at 80% -10%,rgba(111,255,193,.12),transparent 32rem),linear-gradient(180deg,#07120f,#06100d);font-family:var(--sans);min-height:100vh}a{color:inherit;text-decoration:none}button,select{font:inherit}.shell{width:min(1180px,calc(100% - 40px));margin:auto}
+    nav{height:76px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}.brand{display:flex;align-items:center;gap:11px;font-weight:800;letter-spacing:-.03em}.brand-mark{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:var(--lime);color:var(--ink);box-shadow:0 0 30px rgba(215,255,114,.18)}.brand-mark svg{width:20px}.nav-links{display:flex;align-items:center;gap:26px;color:var(--muted);font-size:13px}.nav-links a:hover{color:var(--text)}
+    .status{display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font:12px var(--mono);background:rgba(255,255,255,.02)}.status-dot{width:7px;height:7px;border-radius:50%;background:var(--orange);box-shadow:0 0 12px currentColor}.status.live .status-dot{background:var(--mint)}.status.live{color:#a8d8c5}
+    .hero{padding:88px 0 62px;display:grid;grid-template-columns:1.25fr .75fr;gap:80px;align-items:end}.eyebrow{color:var(--mint);font:12px var(--mono);letter-spacing:.14em;text-transform:uppercase;margin-bottom:20px}h1{margin:0;max-width:760px;font-size:clamp(52px,7.5vw,92px);line-height:.95;letter-spacing:-.075em;font-weight:700}h1 em{color:var(--lime);font-style:normal}.hero-copy{margin:26px 0 0;max-width:640px;color:var(--muted);font-size:17px;line-height:1.7}.hero-actions{display:flex;gap:12px;margin-top:32px}.button{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 18px;border-radius:9px;border:1px solid var(--line);font-size:13px;font-weight:700;transition:.2s}.button.primary{background:var(--lime);color:var(--ink);border-color:var(--lime)}.button:hover{transform:translateY(-2px);border-color:rgba(215,255,114,.45)}
+    .hero-aside{border-left:1px solid var(--line);padding-left:30px}.hero-aside-label{color:var(--muted);font:11px var(--mono);text-transform:uppercase;letter-spacing:.12em}.hero-aside-value{font:38px var(--mono);margin:10px 0 4px}.hero-aside-note{color:var(--muted);font-size:12px}.tech-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:28px}.tech-list span{padding:7px 10px;border-radius:6px;background:rgba(255,255,255,.035);color:#a7bbb4;font:11px var(--mono)}
+    .market-strip{border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.ticker-grid{display:grid;grid-template-columns:repeat(4,1fr)}.ticker{min-height:132px;padding:25px 24px;border-right:1px solid var(--line);position:relative}.ticker:last-child{border-right:0}.ticker-symbol{font:12px var(--mono);color:var(--muted);letter-spacing:.08em}.ticker-price{margin:13px 0 8px;font:26px var(--mono);letter-spacing:-.04em}.ticker-meta{display:flex;justify-content:space-between;font:11px var(--mono);color:var(--muted)}.up{color:var(--mint)}.down{color:var(--red)}.skeleton{animation:pulse 1.3s infinite alternate;color:#43564f}@keyframes pulse{to{opacity:.35}}
+    main{padding:74px 0}.section-head{display:flex;align-items:end;justify-content:space-between;margin-bottom:24px;gap:20px}.section-kicker{color:var(--mint);font:11px var(--mono);letter-spacing:.12em;text-transform:uppercase}h2{font-size:clamp(28px,4vw,44px);letter-spacing:-.045em;margin:8px 0 0;line-height:1.05}.controls{display:flex;gap:8px}select{color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 32px 10px 12px;font:12px var(--mono);outline:none}.chart-panel{padding:28px;border:1px solid var(--line);border-radius:14px;background:rgba(11,27,23,.78)}.chart-wrap{height:390px}.chart-caption{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}.chart-caption strong{font-size:14px}.chart-caption span{color:var(--muted);font:11px var(--mono)}
+    .analytics-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}.mini-panel{padding:26px;border:1px solid var(--line);border-radius:14px;background:rgba(11,27,23,.66)}.mini-head{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:20px}.mini-head h3{font-size:15px;margin:0}.mini-head p{font:10px var(--mono);color:var(--muted);margin:4px 0 0}.mini-chart{height:245px}
+    .pipeline{margin-top:76px}.pipeline-layout{display:grid;grid-template-columns:.75fr 1.25fr;gap:50px;align-items:start}.pipeline-copy p{color:var(--muted);line-height:1.7;font-size:15px}.architecture{margin-top:28px;display:grid;gap:9px}.architecture-row{display:grid;grid-template-columns:26px 1fr auto;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}.architecture-row b{font-size:13px}.architecture-row small{color:var(--muted);font:10px var(--mono)}.node{width:24px;height:24px;display:grid;place-items:center;border-radius:6px;background:rgba(111,255,193,.1);color:var(--mint);font:10px var(--mono)}
+    .metrics{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:14px 14px 0 0;overflow:hidden}.metric{padding:22px;border-right:1px solid var(--line);background:var(--panel)}.metric:last-child{border-right:0}.metric label{display:block;color:var(--muted);font:10px var(--mono);text-transform:uppercase;letter-spacing:.08em}.metric strong{display:block;margin-top:10px;font:25px var(--mono)}.runs{border:1px solid var(--line);border-top:0;border-radius:0 0 14px 14px;overflow:hidden}.run{display:grid;grid-template-columns:1.2fr .7fr .7fr 1.25fr;gap:12px;align-items:center;padding:15px 20px;border-bottom:1px solid var(--line);font:11px var(--mono)}.run:last-child{border-bottom:0}.run.head{color:var(--muted);background:rgba(255,255,255,.02);text-transform:uppercase;font-size:9px;letter-spacing:.08em}.success{color:var(--mint)}.failed{color:var(--red)}.empty{color:var(--muted);padding:24px;font-size:13px}
+    footer{border-top:1px solid var(--line);padding:34px 0 42px;color:var(--muted)}.footer-row{display:flex;justify-content:space-between;gap:20px;align-items:center;font-size:12px}.footer-links{display:flex;gap:18px;font:11px var(--mono)}.footer-links a:hover{color:var(--mint)}
+    @media(max-width:850px){.hero{grid-template-columns:1fr;gap:36px;padding-top:58px}.hero-aside{border-left:0;border-top:1px solid var(--line);padding:25px 0 0}.ticker-grid{grid-template-columns:repeat(2,1fr)}.ticker:nth-child(2){border-right:0}.ticker:nth-child(-n+2){border-bottom:1px solid var(--line)}.analytics-grid,.pipeline-layout{grid-template-columns:1fr}.nav-links>a:not(.button){display:none}}
+    @media(max-width:560px){.shell{width:min(100% - 24px,1180px)}nav{height:66px}.status{display:none}h1{font-size:48px}.hero-actions,.section-head,.footer-row{align-items:stretch;flex-direction:column}.button{width:100%}.ticker{padding:20px 16px}.ticker-price{font-size:21px}.chart-panel,.mini-panel{padding:18px 14px}.chart-wrap{height:310px}.metrics{grid-template-columns:1fr}.metric{border-right:0;border-bottom:1px solid var(--line)}.run{grid-template-columns:1fr 1fr}.run span:nth-child(3),.run span:nth-child(4){display:none}}
   </style>
 </head>
-<body class="min-h-screen p-6">
-
-  <!-- header -->
-  <div class="mb-8">
-    <h1 class="text-3xl font-bold text-white">FinPipeline</h1>
-    <p class="text-slate-400 mt-1">Financial data pipeline dashboard</p>
-    <div id="api-status" class="mt-2 text-sm"></div>
-  </div>
-
-  <!-- market summary cards -->
-  <div class="grid grid-cols-2 gap-4 mb-8 lg:grid-cols-4" id="summary-cards">
-    <div class="card p-4 animate-pulse"><div class="h-4 bg-slate-700 rounded mb-2"></div><div class="h-8 bg-slate-700 rounded"></div></div>
-    <div class="card p-4 animate-pulse"><div class="h-4 bg-slate-700 rounded mb-2"></div><div class="h-8 bg-slate-700 rounded"></div></div>
-    <div class="card p-4 animate-pulse"><div class="h-4 bg-slate-700 rounded mb-2"></div><div class="h-8 bg-slate-700 rounded"></div></div>
-    <div class="card p-4 animate-pulse"><div class="h-4 bg-slate-700 rounded mb-2"></div><div class="h-8 bg-slate-700 rounded"></div></div>
-  </div>
-
-  <!-- price chart -->
-  <div class="card p-6 mb-6">
-    <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
-      <h2 class="text-lg font-semibold">Price History + Rolling Average</h2>
-      <div class="flex gap-2">
-        <select id="ticker-select">
-          <option value="AAPL">AAPL</option>
-          <option value="GOOGL">GOOGL</option>
-          <option value="MSFT">MSFT</option>
-          <option value="TSLA">TSLA</option>
-        </select>
-        <select id="window-select">
-          <option value="7">7-day MA</option>
-          <option value="30" selected>30-day MA</option>
-          <option value="60">60-day MA</option>
-        </select>
-        <button onclick="loadPriceChart()">Update</button>
-      </div>
-    </div>
-    <canvas id="price-chart" height="100"></canvas>
-  </div>
-
-  <!-- volatility + macro row -->
-  <div class="grid grid-cols-1 gap-6 mb-6 lg:grid-cols-2">
-    <div class="card p-6">
-      <h2 class="text-lg font-semibold mb-4">Annualized Volatility (90 days)</h2>
-      <canvas id="volatility-chart" height="200"></canvas>
-    </div>
-    <div class="card p-6">
-      <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h2 class="text-lg font-semibold">Macro Indicator</h2>
-        <select id="indicator-select" onchange="loadMacroChart()">
-          <option value="FEDFUNDS">Fed Funds Rate</option>
-          <option value="CPI">CPI</option>
-          <option value="UNRATE">Unemployment</option>
-          <option value="T10Y2Y">Yield Curve</option>
-          <option value="GDP">GDP</option>
-        </select>
-      </div>
-      <canvas id="macro-chart" height="200"></canvas>
-    </div>
-  </div>
-
-  <!-- pipeline health -->
-  <div class="card p-6">
-    <h2 class="text-lg font-semibold mb-4">Pipeline Health</h2>
-    <div id="pipeline-table">Loading...</div>
-  </div>
-
+<body>
+  <header class="shell"><nav><a class="brand" href="/"><span class="brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M4 17V9m5 8V5m5 12v-7m5 7V3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span><span>FinPipeline</span></a><div class="nav-links"><a href="#market">Market</a><a href="#macro">Macro</a><a href="#pipeline">Pipeline</a><span class="status" id="api-status"><span class="status-dot"></span><span>CONNECTING</span></span><a class="button" href="/docs">Explore API ↗</a></div></nav></header>
+  <section class="hero shell"><div><div class="eyebrow">Live market intelligence infrastructure</div><h1>Market signals.<br><em>Macro context.</em></h1><p class="hero-copy">A production data pipeline that ingests US equities and Federal Reserve indicators, computes rolling analytics, and serves everything through a documented FastAPI interface.</p><div class="hero-actions"><a class="button primary" href="#market">View live dashboard ↓</a><a class="button" href="https://github.com/rid325/finpipeline" target="_blank" rel="noreferrer">View source on GitHub ↗</a></div></div><aside class="hero-aside"><div class="hero-aside-label">Latest market date</div><div class="hero-aside-value" id="hero-date">—</div><div class="hero-aside-note">Automated ingestion · PostgreSQL persistence</div><div class="tech-list"><span>FASTAPI</span><span>POSTGRES</span><span>ALEMBIC</span><span>APScheduler</span><span>DOCKER</span></div></aside></section>
+  <section class="market-strip" id="market"><div class="shell ticker-grid" id="ticker-grid"><div class="ticker skeleton">Loading AAPL…</div><div class="ticker skeleton">Loading GOOGL…</div><div class="ticker skeleton">Loading MSFT…</div><div class="ticker skeleton">Loading TSLA…</div></div></section>
+  <main class="shell">
+    <section><div class="section-head"><div><div class="section-kicker">Equity analytics</div><h2>Price trend, without the noise.</h2></div><div class="controls"><select id="ticker-select" aria-label="Ticker"><option>AAPL</option><option>GOOGL</option><option>MSFT</option><option>TSLA</option></select><select id="window-select" aria-label="Moving average"><option value="7">7D MA</option><option value="30" selected>30D MA</option><option value="60">60D MA</option></select></div></div><div class="chart-panel"><div class="chart-caption"><strong id="price-title">AAPL closing price</strong><span>1 YEAR · DAILY</span></div><div class="chart-wrap"><canvas id="price-chart"></canvas></div></div></section>
+    <section class="analytics-grid" id="macro"><div class="mini-panel"><div class="mini-head"><div><h3>Annualized volatility</h3><p>TRAILING 90 TRADING DAYS</p></div></div><div class="mini-chart"><canvas id="volatility-chart"></canvas></div></div><div class="mini-panel"><div class="mini-head"><div><h3>Macroeconomic signal</h3><p>OFFICIAL FRED SERIES</p></div><select id="indicator-select"><option value="CPI">Inflation · CPI</option><option value="FEDFUNDS">Fed Funds</option><option value="UNRATE">Unemployment</option><option value="T10Y2Y">Yield Curve</option><option value="GDP">GDP</option></select></div><div class="mini-chart"><canvas id="macro-chart"></canvas></div></div></section>
+    <section class="pipeline" id="pipeline"><div class="pipeline-layout"><div class="pipeline-copy"><div class="section-kicker">Under the hood</div><h2>A pipeline built to keep moving.</h2><p>Scheduled ingestion jobs collect market and macro data, validate and persist each observation, then expose analytics through a monitored API. Every run is recorded for traceability.</p><div class="architecture"><div class="architecture-row"><span class="node">01</span><b>Yahoo Finance + FRED</b><small>INGEST</small></div><div class="architecture-row"><span class="node">02</span><b>Validation + normalization</b><small>PROCESS</small></div><div class="architecture-row"><span class="node">03</span><b>PostgreSQL + Alembic</b><small>STORE</small></div><div class="architecture-row"><span class="node">04</span><b>FastAPI analytics layer</b><small>SERVE</small></div></div></div><div><div class="metrics"><div class="metric"><label>Stock observations</label><strong id="stock-count">—</strong></div><div class="metric"><label>Macro observations</label><strong id="macro-count">—</strong></div><div class="metric"><label>Tracked series</label><strong>09</strong></div></div><div class="runs" id="runs"><div class="empty">Loading recent pipeline runs…</div></div></div></div></section>
+  </main>
+  <footer><div class="shell footer-row"><span>Designed and engineered as a production data systems project.</span><div class="footer-links"><a href="/docs">API DOCS ↗</a><a href="/health">HEALTH ↗</a><a href="https://github.com/rid325/finpipeline" target="_blank" rel="noreferrer">GITHUB ↗</a></div></div></footer>
   <script>
-    // Override with ?api=https://your-service.up.railway.app when the dashboard
-    // is hosted separately. Same-origin is the safest default.
-    const API = new URLSearchParams(window.location.search).get('api')
-      || (window.location.protocol === 'file:' ? 'http://localhost:8000' : window.location.origin);
-
-    let priceChartInstance = null;
-    let macroChartInstance = null;
-    let volatilityChartInstance = null;
-
-    async function fetchJSON(url) {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    }
-
-    function formatChange(pct) {
-      const sign = pct >= 0 ? '+' : '';
-      const cls = pct >= 0 ? 'positive' : 'negative';
-      return `<span class="${cls}">${sign}${pct.toFixed(2)}%</span>`;
-    }
-
-    async function checkHealth() {
-      try {
-        const data = await fetchJSON(`${API}/health`);
-        document.getElementById('api-status').innerHTML =
-          `<span class="positive">● API ${data.status} — database ${data.database}</span>`;
-      } catch {
-        document.getElementById('api-status').innerHTML =
-          `<span class="negative">● API unreachable</span>`;
-      }
-    }
-
-    async function loadSummaryCards() {
-      try {
-        const data = await fetchJSON(`${API}/stocks/summary`);
-        const container = document.getElementById('summary-cards');
-        container.innerHTML = data.data.map(stock => `
-          <div class="card p-4">
-            <div class="text-slate-400 text-sm font-medium mb-1">${stock.ticker}</div>
-            <div class="stat-value">$${stock.latest_price.toFixed(2)}</div>
-            <div class="mt-1 text-sm">${formatChange(stock['30d_change_pct'])} 30d</div>
-            <div class="text-slate-500 text-xs mt-1">${stock.latest_date}</div>
-          </div>
-        `).join('');
-      } catch (e) {
-        document.getElementById('summary-cards').innerHTML =
-          `<div class="text-red-400">Failed to load summary: ${e.message}</div>`;
-      }
-    }
-
-    async function loadPriceChart() {
-      const ticker = document.getElementById('ticker-select').value;
-      const window = document.getElementById('window-select').value;
-      try {
-        const data = await fetchJSON(`${API}/stocks/${ticker}/rolling-average?window=${window}`);
-        const labels = data.data.map(d => d.date);
-        const closes = data.data.map(d => d.close);
-        const averages = data.data.map(d => d.rolling_avg);
-
-        if (priceChartInstance) priceChartInstance.destroy();
-        priceChartInstance = new Chart(document.getElementById('price-chart'), {
-          type: 'line',
-          data: {
-            labels,
-            datasets: [
-              { label: `${ticker} Close`, data: closes, borderColor: '#60a5fa', backgroundColor: 'rgba(96,165,250,0.05)', borderWidth: 1.5, pointRadius: 0, tension: 0.1 },
-              { label: `${window}-day MA`, data: averages, borderColor: '#f59e0b', borderWidth: 2, pointRadius: 0, tension: 0.3 }
-            ]
-          },
-          options: {
-            responsive: true,
-            plugins: { legend: { labels: { color: '#94a3b8' } } },
-            scales: {
-              x: { ticks: { color: '#64748b', maxTicksLimit: 8 }, grid: { color: '#1e293b' } },
-              y: { ticks: { color: '#64748b' }, grid: { color: '#334155' } }
-            }
-          }
-        });
-      } catch (e) { console.error('Price chart error:', e); }
-    }
-
-    async function loadVolatilityChart() {
-      try {
-        const tickers = ['AAPL', 'GOOGL', 'MSFT', 'TSLA'];
-        const results = await Promise.all(tickers.map(t => fetchJSON(`${API}/stocks/${t}/volatility?days=90`)));
-        const labels = results.map(r => r.ticker);
-        const values = results.map(r => r.volatility_pct);
-        const colors = values.map(v => v < 25 ? '#22c55e' : v < 40 ? '#f59e0b' : '#ef4444');
-
-        if (volatilityChartInstance) volatilityChartInstance.destroy();
-        volatilityChartInstance = new Chart(document.getElementById('volatility-chart'), {
-          type: 'bar',
-          data: { labels, datasets: [{ label: 'Annualized Volatility %', data: values, backgroundColor: colors, borderRadius: 6 }] },
-          options: {
-            responsive: true,
-            plugins: { legend: { display: false } },
-            scales: {
-              x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
-              y: { ticks: { color: '#94a3b8', callback: v => v + '%' }, grid: { color: '#334155' } }
-            }
-          }
-        });
-      } catch (e) { console.error('Volatility chart error:', e); }
-    }
-
-    async function loadMacroChart() {
-      const indicator = document.getElementById('indicator-select').value;
-      try {
-        const data = await fetchJSON(`${API}/macro/${indicator}?start_date=2020-01-01&end_date=2024-06-01`);
-        const labels = data.data.map(d => d.date);
-        const values = data.data.map(d => d.value);
-
-        if (macroChartInstance) macroChartInstance.destroy();
-        macroChartInstance = new Chart(document.getElementById('macro-chart'), {
-          type: 'line',
-          data: { labels, datasets: [{ label: indicator, data: values, borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.05)', borderWidth: 2, pointRadius: 2, tension: 0.3 }] },
-          options: {
-            responsive: true,
-            plugins: { legend: { labels: { color: '#94a3b8' } } },
-            scales: {
-              x: { ticks: { color: '#64748b', maxTicksLimit: 8 }, grid: { color: '#334155' } },
-              y: { ticks: { color: '#64748b' }, grid: { color: '#334155' } }
-            }
-          }
-        });
-      } catch (e) { console.error('Macro chart error:', e); }
-    }
-
-    async function loadPipelineHealth() {
-      try {
-        const [runs, metrics] = await Promise.all([
-          fetchJSON(`${API}/pipeline/runs?limit=5`),
-          fetchJSON(`${API}/metrics`)
-        ]);
-
-        document.getElementById('pipeline-table').innerHTML = `
-          <div class="grid grid-cols-3 gap-4 mb-6">
-            <div class="bg-slate-800 rounded-lg p-3">
-              <div class="text-slate-400 text-xs mb-1">Stock prices</div>
-              <div class="text-xl font-bold">${metrics.database.stock_prices_count.toLocaleString()}</div>
-            </div>
-            <div class="bg-slate-800 rounded-lg p-3">
-              <div class="text-slate-400 text-xs mb-1">Macro indicators</div>
-              <div class="text-xl font-bold">${metrics.database.economic_indicators_count.toLocaleString()}</div>
-            </div>
-            <div class="bg-slate-800 rounded-lg p-3">
-              <div class="text-slate-400 text-xs mb-1">Latest data</div>
-              <div class="text-xl font-bold">${metrics.database.latest_stock_date}</div>
-            </div>
-          </div>
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="text-slate-400 text-left border-b border-slate-700">
-                <th class="pb-2 pr-4">Source</th>
-                <th class="pb-2 pr-4">Status</th>
-                <th class="pb-2 pr-4">Records</th>
-                <th class="pb-2">Started</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${runs.runs.map(r => `
-                <tr class="border-b border-slate-800">
-                  <td class="py-2 pr-4 font-mono text-xs">${r.source}</td>
-                  <td class="py-2 pr-4"><span class="${r.status === 'success' ? 'positive' : 'negative'}">${r.status}</span></td>
-                  <td class="py-2 pr-4">${r.records_fetched}</td>
-                  <td class="py-2 text-slate-400 text-xs">${r.started_at.slice(0, 19)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        `;
-      } catch (e) {
-        document.getElementById('pipeline-table').innerHTML =
-          `<div class="text-red-400">Failed to load pipeline data: ${e.message}</div>`;
-      }
-    }
-
-    async function init() {
-      await checkHealth();
-      await Promise.all([loadSummaryCards(), loadPriceChart(), loadVolatilityChart(), loadMacroChart(), loadPipelineHealth()]);
-    }
-
-    init();
+    const API=new URLSearchParams(location.search).get('api')||location.origin,chartText='#8ca49c',chartGrid='rgba(192,255,225,.08)';Chart.defaults.color=chartText;Chart.defaults.font.family='DM Mono';let priceChart,volatilityChart,macroChart;
+    async function getJSON(path){const r=await fetch(API+path);if(!r.ok)throw new Error(`${r.status} ${r.statusText}`);return r.json()}const compact=v=>new Intl.NumberFormat('en',{notation:'compact',maximumFractionDigits:1}).format(v);
+    const chartOptions=(percent=false)=>({responsive:true,maintainAspectRatio:false,interaction:{intersect:false,mode:'index'},plugins:{legend:{labels:{usePointStyle:true,pointStyle:'circle',boxWidth:6,boxHeight:6,padding:18}},tooltip:{backgroundColor:'#10241e',borderColor:'rgba(192,255,225,.15)',borderWidth:1,padding:12}},scales:{x:{grid:{display:false},ticks:{maxTicksLimit:7,maxRotation:0}},y:{border:{display:false},grid:{color:chartGrid},ticks:{callback:v=>percent?`${v}%`:v}}}});
+    async function loadStatus(){const s=document.getElementById('api-status');try{const d=await getJSON('/health');s.classList.add('live');s.lastElementChild.textContent=`${d.status.toUpperCase()} · DB ${d.database.toUpperCase()}`}catch{s.lastElementChild.textContent='API UNREACHABLE'}}
+    async function loadSummary(){const p=await getJSON('/stocks/summary'),order=['AAPL','GOOGL','MSFT','TSLA'];p.data.sort((a,b)=>order.indexOf(a.ticker)-order.indexOf(b.ticker));document.getElementById('ticker-grid').innerHTML=p.data.map(x=>{const up=x['30d_change_pct']>=0;return `<article class="ticker"><div class="ticker-symbol">${x.ticker} / USD</div><div class="ticker-price">$${Number(x.latest_price).toFixed(2)}</div><div class="ticker-meta"><span class="${up?'up':'down'}">${up?'▲':'▼'} ${Math.abs(x['30d_change_pct']).toFixed(2)}%</span><span>30D</span></div></article>`}).join('')}
+    async function loadPrice(){const t=document.getElementById('ticker-select').value,w=document.getElementById('window-select').value,p=await getJSON(`/stocks/${t}/rolling-average?window=${w}`),d=p.data.slice(-252);document.getElementById('price-title').textContent=`${t} closing price`;if(priceChart)priceChart.destroy();priceChart=new Chart(document.getElementById('price-chart'),{type:'line',data:{labels:d.map(x=>x.date),datasets:[{label:`${t} close`,data:d.map(x=>x.close),borderColor:'#6fffc1',backgroundColor:'rgba(111,255,193,.08)',fill:true,borderWidth:1.7,pointRadius:0,tension:.18},{label:`${w}D moving average`,data:d.map(x=>x.rolling_avg),borderColor:'#d7ff72',borderDash:[5,5],borderWidth:1.5,pointRadius:0,tension:.25}]},options:chartOptions()})}
+    async function loadVolatility(){const ts=['AAPL','GOOGL','MSFT','TSLA'],d=await Promise.all(ts.map(t=>getJSON(`/stocks/${t}/volatility?days=90`)));if(volatilityChart)volatilityChart.destroy();volatilityChart=new Chart(document.getElementById('volatility-chart'),{type:'bar',data:{labels:d.map(x=>x.ticker),datasets:[{data:d.map(x=>x.volatility_pct),backgroundColor:d.map(x=>x.volatility_pct>40?'#ffad66':'#6fffc1'),borderRadius:5,borderSkipped:false}]},options:{...chartOptions(true),plugins:{legend:{display:false},tooltip:chartOptions().plugins.tooltip}}})}
+    async function loadMacro(){const i=document.getElementById('indicator-select').value,end=new Date().toISOString().slice(0,10),p=await getJSON(`/macro/${i}?start_date=2021-01-01&end_date=${end}`);if(macroChart)macroChart.destroy();macroChart=new Chart(document.getElementById('macro-chart'),{type:'line',data:{labels:p.data.map(x=>x.date),datasets:[{label:i,data:p.data.map(x=>x.value),borderColor:'#d7ff72',backgroundColor:'rgba(215,255,114,.06)',fill:true,pointRadius:1.5,pointHoverRadius:5,borderWidth:1.8,tension:.25}]},options:chartOptions()})}
+    async function loadPipeline(){const[m,r]=await Promise.all([getJSON('/metrics'),getJSON('/pipeline/runs?limit=5')]);document.getElementById('stock-count').textContent=compact(m.database.stock_prices_count);document.getElementById('macro-count').textContent=compact(m.database.economic_indicators_count);document.getElementById('hero-date').textContent=m.database.latest_stock_date||'—';document.getElementById('runs').innerHTML='<div class="run head"><span>Source</span><span>Status</span><span>Records</span><span>Completed</span></div>'+r.runs.map(x=>`<div class="run"><span>${x.source}</span><span class="${x.status}">● ${x.status}</span><span>${Number(x.records_fetched||0).toLocaleString()}</span><span>${x.completed_at?x.completed_at.slice(0,19).replace('T',' '):'in progress'}</span></div>`).join('')}
+    function showError(e){console.error(e);document.getElementById('api-status').lastElementChild.textContent='PARTIAL DATA ERROR'}document.getElementById('ticker-select').addEventListener('change',()=>loadPrice().catch(showError));document.getElementById('window-select').addEventListener('change',()=>loadPrice().catch(showError));document.getElementById('indicator-select').addEventListener('change',()=>loadMacro().catch(showError));loadStatus();Promise.all([loadSummary(),loadPrice(),loadVolatility(),loadMacro(),loadPipeline()]).catch(showError);
   </script>
 </body>
 </html>

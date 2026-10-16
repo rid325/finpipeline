@@ -1,6 +1,7 @@
 # src/api.py
 from fastapi import FastAPI, HTTPException, Query, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -11,6 +12,7 @@ from datetime import datetime, timedelta
 import time
 import logging
 import json
+from pathlib import Path
 
 from src.analytics import (
     get_price_history,
@@ -47,6 +49,7 @@ VALID_TICKERS = {'AAPL', 'GOOGL', 'MSFT', 'TSLA'}
 VALID_INDICATORS = {'CPI', 'FEDFUNDS', 'UNRATE', 'GDP', 'T10Y2Y'}
 
 scheduler = AsyncIOScheduler()
+DASHBOARD_PATH = Path(__file__).resolve().parent.parent / "dashboard" / "index.html"
 
 
 # ── scheduled pipeline jobs ────────────────────────────────────────────────
@@ -209,7 +212,13 @@ def me(current_user: str = Depends(get_current_user)):
 # ── public endpoints ───────────────────────────────────────────────────────
 @app.get("/")
 def service_info():
-    """Human-friendly landing response for the public deployment URL."""
+    """Serve the live dashboard at the public deployment URL."""
+    return FileResponse(DASHBOARD_PATH)
+
+
+@app.get("/api")
+def api_info():
+    """Machine-readable service discovery response."""
     return {
         "service": "FinPipeline",
         "status": "online",

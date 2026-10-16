@@ -2,11 +2,12 @@
 
 FinPipeline is a production-oriented financial data pipeline and analytics API. It ingests market data from Yahoo Finance and macroeconomic series from FRED, stores them in PostgreSQL, and exposes analytics, regime classification, similarity search, and backtesting through FastAPI.
 
-> **Live deployment:** [API](https://finpipeline.onrender.com) · [Swagger docs](https://finpipeline.onrender.com/docs) · [Health](https://finpipeline.onrender.com/health)
+> **Live deployment:** [Dashboard](https://finpipeline.onrender.com) · [Swagger docs](https://finpipeline.onrender.com/docs) · [Health](https://finpipeline.onrender.com/health)
 
 ## Highlights
 
 - Scheduled stock and macro ingestion with auditable pipeline runs
+- Responsive live dashboard with equity, volatility, macro, and pipeline charts
 - Rolling averages, annualized volatility, and market summaries
 - Macro regime fingerprints and cosine-similarity historical search
 - Forward-return analysis and regime backtesting

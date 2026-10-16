@@ -17,6 +17,7 @@ RUN poetry config virtualenvs.create false \
 
 # copy the rest of your code
 COPY finpipeline/src/ ./src/
+COPY finpipeline/dashboard/ ./dashboard/
 COPY finpipeline/migrations/ ./migrations/
 COPY finpipeline/alembic.ini ./
 

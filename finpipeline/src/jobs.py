@@ -39,7 +39,12 @@ def run_news() -> dict:
     return fetch_and_store_news()
 
 
-JOBS = {"market": run_market, "macro": run_macro, "news": run_news}
+def run_regime() -> dict:
+    from src.regime_v2 import store_india_fingerprints
+    return store_india_fingerprints()
+
+
+JOBS = {"market": run_market, "macro": run_macro, "news": run_news, "regime": run_regime}
 
 
 def main(argv=None) -> int:

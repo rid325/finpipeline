@@ -32,3 +32,14 @@
 - ET, Mint, and Business Standard feeds were technically verified but require permission for this use; Moneycontrol returned HTTP 403, so all are disabled by default.
 - The scheduled job is still useful and safe: a licensed source can be enabled by feed ID without code changes, and one failing feed produces a partial run rather than discarding others.
 - The requested real 50-headline evaluation was rejected rather than copied against terms; the zero-sample limitation is explicit in `docs/news_tagging_eval.md`.
+
+## Phase 3 — India-aware regime analogues
+
+- Version `india-us-v1` uses a fixed ten-feature vector: Nifty return/volatility, India VIX, USD/INR, Brent, and five transformed US macro features.
+- CPI and GDP become year-over-year rates rather than incomparable index/level trends; mixed-frequency macro values are only carried forward from observations dated on or before each month.
+- Each month is z-scored with its own expanding history, including only that month and earlier months; at least 24 complete months are required.
+- Current and future rows are excluded from analogue candidates, zero-norm vectors are rejected, and the append-a-future-outlier regression test proves earlier vectors do not change.
+- Similarity is descriptive cosine similarity over named standardized features; the endpoint returns exactly three usable analogues or an explicit insufficient-history state.
+- Forward outcomes use 21, 63, and 126 later Nifty trading sessions, not calendar-day guesses, with the sample size stated for every horizon.
+- JSONB named vectors keep the schema explainable and versioned while preserving legacy fingerprint columns during migration.
+- Current FRED revisions are not real-time vintages, so the API and UI state that this is historical analogy—not a forecast, investment advice, or true vintage backtest.

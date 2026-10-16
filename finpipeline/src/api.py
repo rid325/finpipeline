@@ -31,6 +31,7 @@ from src.validators import validate_date, validate_date_range, validate_ticker
 from src.config import ENABLE_APSCHEDULER
 from src.instruments import list_instruments, list_macro_series
 from src.news import FEEDS, get_move_days, query_news
+from src.regime_v2 import compute_regime_current
 
 
 # ── structured JSON logging ────────────────────────────────────────────────
@@ -457,6 +458,16 @@ def moves(
         "definition": "absolute daily adjusted return above 2x trailing 90-session standard deviation",
         "headline_label": "headlines on the day; not evidence of cause",
     }
+
+
+@app.get("/regime/current")
+def india_regime_current():
+    """India-aware historical analogues with no-lookahead expanding scaling."""
+    try:
+        return compute_regime_current()
+    except Exception as error:
+        logger.error(f"Error computing India regime: {error}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ── protected analysis endpoints ───────────────────────────────────────────

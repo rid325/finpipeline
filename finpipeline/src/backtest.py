@@ -14,6 +14,7 @@ def run_regime_backtest(ticker: str, horizon_days: int = 60) -> dict:
     cursor.execute("""
         SELECT date, regime, overall_stress_score
         FROM macro_fingerprints
+        WHERE method_version = 'legacy-us-v0'
         ORDER BY date ASC
     """)
     fingerprint_rows = cursor.fetchall()

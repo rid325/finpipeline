@@ -170,6 +170,7 @@ def get_similar_periods(n: int = 10, as_of_date: str = None) -> list[dict]:
                cpi_percentile, fedfunds_percentile,
                unrate_percentile, gdp_percentile, t10y2y_percentile
         FROM macro_fingerprints
+        WHERE method_version = 'legacy-us-v0'
         ORDER BY date ASC
     """)
     rows = cursor.fetchall()
@@ -303,10 +304,10 @@ def store_fingerprints():
             cursor.execute("""
                 INSERT INTO macro_fingerprints
                     (date, regime, overall_stress_score,
-                     cpi_percentile, fedfunds_percentile,
+                     cpi_percentile, fedfunds_percentile, method_version,
                      unrate_percentile, gdp_percentile, t10y2y_percentile)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (date) DO UPDATE SET
+                VALUES (%s, %s, %s, %s, %s, 'legacy-us-v0', %s, %s, %s)
+                ON CONFLICT (date, method_version) DO UPDATE SET
                     regime = EXCLUDED.regime,
                     overall_stress_score = EXCLUDED.overall_stress_score,
                     cpi_percentile = EXCLUDED.cpi_percentile,

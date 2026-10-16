@@ -3,12 +3,14 @@ import argparse
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import sys
+import time
 
 from src.fetchers.macro_fetcher import fetch_and_store_indicators
 from src.fetchers.stock_fetcher import fetch_and_store_stocks
 
 
 from src.instruments import list_instruments
+from src.db import get_connection
 
 
 def run_market(market: str = "india", backfill: bool = False) -> dict:
@@ -23,11 +25,13 @@ def run_market(market: str = "india", backfill: bool = False) -> dict:
     )
 
 
-def run_macro(market: str | None = None) -> dict:
+def run_macro(market: str | None = None, backfill: bool = False) -> dict:
     end = datetime.now(timezone.utc).date()
-    start = end - timedelta(days=90)
+    start = end - timedelta(days=365 * 10 if backfill else 90)
     return fetch_and_store_indicators(
-        str(start), str(end), job_name=f"macro-{market or 'all'}", market=market
+        str(start), str(end),
+        job_name=f"macro-{market or 'all'}{'-backfill' if backfill else ''}",
+        market=market,
     )
 
 
@@ -41,7 +45,27 @@ def run_news() -> dict:
 
 def run_regime() -> dict:
     from src.regime_v2 import store_india_fingerprints
-    return store_india_fingerprints()
+    conn = get_connection(); cursor = conn.cursor()
+    started = datetime.now(timezone.utc); clock = time.monotonic()
+    cursor.execute("""
+        INSERT INTO pipeline_runs (source, job_name, status, started_at)
+        VALUES ('derived', 'regime-india-us-v1', 'running', %s) RETURNING id
+    """, (started,))
+    run_id = cursor.fetchone()[0]; conn.commit()
+    try:
+        result = store_india_fingerprints()
+    except Exception as error:
+        result = {"total_inserted": 0, "errors": [str(error)]}
+    errors = result.get("errors", [])
+    cursor.execute("""
+        UPDATE pipeline_runs SET status=%s, records_fetched=%s, error_message=%s,
+            completed_at=%s, duration_ms=%s WHERE id=%s
+    """, ('failed' if errors else 'success', result.get('total_inserted', 0),
+          '\n'.join(errors) or None, datetime.now(timezone.utc),
+          round((time.monotonic() - clock) * 1000), run_id))
+    conn.commit(); cursor.close(); conn.close()
+    result["run_id"] = run_id
+    return result
 
 
 JOBS = {"market": run_market, "macro": run_macro, "news": run_news, "regime": run_regime}
@@ -58,7 +82,7 @@ def main(argv=None) -> int:
         if args.job == "market":
             result = run_market(args.market or "india", args.backfill)
         elif args.job == "macro":
-            result = run_macro(args.market)
+            result = run_macro(args.market, args.backfill)
         else:
             result = JOBS[args.job]()
     except Exception as error:

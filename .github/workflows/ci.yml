@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: finpipeline_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d finpipeline_test"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/finpipeline_test
+      MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/finpipeline_test
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/finpipeline_test
+      SECRET_KEY: test-only-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pipx install poetry==2.3.2
+      - run: poetry install --no-interaction --no-root
+      - run: poetry run alembic -c finpipeline/alembic.ini upgrade head
+      - run: poetry run pytest -q
+      - run: docker build -f finpipeline/Dockerfile -t finpipeline:test .
+      - run: docker compose config --quiet

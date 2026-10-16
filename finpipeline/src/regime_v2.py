@@ -184,7 +184,7 @@ def _insufficient(available: int, missing: list[str]) -> dict:
 def store_india_fingerprints() -> dict:
     markets, macro = _load_inputs()
     if any(frame.empty for frame in list(markets.values()) + list(macro.values())):
-        return {"total_inserted": 0, "errors": ["required regime inputs are missing"]}
+        return {"total_inserted": 0, "errors": [], "warnings": ["required regime inputs are missing"]}
     raw, _ = build_raw_monthly_features(markets, macro)
     raw = raw.dropna()
     standardized = expanding_zscores(raw).dropna()

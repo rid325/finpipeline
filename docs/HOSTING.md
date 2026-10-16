@@ -19,3 +19,5 @@ The restore script does not remove existing objects unless `RESTORE_CLEAN=1` is 
 ## Scheduled workflow inactivity
 
 GitHub can disable scheduled workflows in a public repository after 60 days without repository activity. Scheduled executions should not be assumed to reset that timer. Keep the workflows on the default branch, use their manual-dispatch buttons for recovery, and set an external reminder before day 60 to check that both schedules remain enabled.
+
+References: [Neon connection pooling](https://neon.com/docs/connect/connection-pooling), [Neon secure connections](https://neon.com/docs/connect/connect-securely), and [GitHub scheduled-workflow inactivity behavior](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).

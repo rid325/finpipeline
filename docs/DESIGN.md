@@ -32,6 +32,7 @@
 - ET, Mint, and Business Standard feeds were technically verified but require permission for this use; Moneycontrol returned HTTP 403, so all are disabled by default.
 - The scheduled job is still useful and safe: a licensed source can be enabled by feed ID without code changes, and one failing feed produces a partial run rather than discarding others.
 - The requested real 50-headline evaluation was rejected rather than copied against terms; the zero-sample limitation is explicit in `docs/news_tagging_eval.md`.
+- `feedparser` is the only runtime dependency added: it handles RSS date/namespace variations more safely than a custom XML parser.
 
 ## Phase 3 — India-aware regime analogues
 
@@ -54,3 +55,15 @@
 - News reports `not_configured` while publisher permission is absent instead of presenting an empty feed as a live news product.
 - Dashboard loaders settle independently so a missing optional dataset does not leave otherwise healthy panels stuck in loading state.
 - Marketing claims were replaced with measured database counts, explicit formulas, upstream-delay expectations, and known limitations.
+
+## Phase 5 — tests, CI, and reproducible operation
+
+- CI applies the complete migration chain to PostgreSQL 16, runs pytest, builds the production image, and validates Docker Compose on every push and pull request.
+- Unit coverage now includes Neon retry behavior, IST dates, ticker syntax, repo-rate fixtures, URL/title dedupe, deterministic tags, move thresholds, expanding z-scores, leakage, and freshness.
+- A PostgreSQL integration test executes the market upsert twice and proves the longest configured symbol remains one natural-key row.
+- The health test verifies `/health` performs only one connection check and closes it; ingestion is never triggered by readiness checks.
+- Compose provides one local PostgreSQL service and one API service; jobs are explicit one-shot commands so local schedules cannot accidentally duplicate production jobs.
+- Poetry is pinned in the image, the curated RBI data is copied into it, and the runtime uses an unprivileged user plus an HTTP health check.
+- README architecture, endpoints, source licensing, environment variables, and deployment steps now match the code and workflows.
+- Full end-to-end source ingestion remains an operator action because CI must not depend on Yahoo/FRED availability or production secrets.
+- `httpx` is development-only and exists solely to exercise FastAPI routes through its supported test client.

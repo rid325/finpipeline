@@ -4,18 +4,17 @@ from jose import JWTError, jwt
 import bcrypt
 from fastapi import HTTPException, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from src.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from src.config import (
+    SECRET_KEY,
+    ALGORITHM,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    AUTH_USERNAME,
+    AUTH_PASSWORD,
+)
 
 security = HTTPBearer()
 
-# in production these come from a database
-# hardcoded user is sufficient to demonstrate the auth pattern
-USERS = {
-    "admin": {
-        "username": "admin",
-        "hashed_password": None  # set below on module load
-    }
-}
+USERS = {}
 
 
 def hash_password(password: str) -> str:
@@ -44,7 +43,7 @@ def decode_token(token: str) -> dict:
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Security(security)
+    credentials: HTTPAuthorizationCredentials = Security(security),
 ) -> str:
     """Dependency — extracts and validates user from Bearer token."""
     payload = decode_token(credentials.credentials)
@@ -54,5 +53,11 @@ def get_current_user(
     return username
 
 
-# set hashed password on module load
-USERS["admin"]["hashed_password"] = hash_password("adminpassword123")
+# A single demo user is intentionally configured through deployment secrets.
+# If either value is absent, login stays disabled instead of falling back to a
+# credential published in the repository.
+if AUTH_USERNAME and AUTH_PASSWORD:
+    USERS[AUTH_USERNAME] = {
+        "username": AUTH_USERNAME,
+        "hashed_password": hash_password(AUTH_PASSWORD),
+    }

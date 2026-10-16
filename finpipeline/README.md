@@ -1,8 +1,8 @@
 # finpipeline
 
-A financial data pipeline I built from scratch — pulls real stock and macro data, runs analytics, exposes everything through a REST API, and deploys on Railway with Docker.
+A financial data pipeline I built from scratch — pulls real stock and macro data, runs analytics, exposes everything through a REST API, and is packaged for Railway with Docker.
 
-The idea was to build something that actually does useful work: fetch data from Yahoo Finance and the FRED API, store it in Postgres, analyse it, and serve it. Not a tutorial project — the data is real, the API is live, and the analysis has genuine signal.
+The idea was to build something that actually does useful work: fetch data from Yahoo Finance and the FRED API, store it in Postgres, analyse it, and serve it. The data is real and the analysis is designed to be testable rather than presented as a toy calculation.
 
 ---
 
@@ -18,13 +18,13 @@ The idea was to build something that actually does useful work: fetch data from 
 - Backtests the regime classification to check whether it actually predicts anything
 - Serves all of this through a FastAPI REST API with JWT authentication and rate limiting
 - Runs on a schedule — stock data at 6pm daily, macro data Monday mornings
-- Deployed on Railway with Docker, live at `https://finpipeline-production.up.railway.app`
+- Ready to deploy on Railway with Docker and PostgreSQL
 
 ---
 
-## Live API
+## API
 
-**Base URL:** `https://finpipeline-production.up.railway.app`
+> **Deployment status:** the previous Railway service is offline. A new public URL will be added only after the replacement deployment passes `/health` and endpoint checks.
 
 ### Public endpoints
 
@@ -51,13 +51,16 @@ The idea was to build something that actually does useful work: fetch data from 
 ### Auth endpoints
 
 ```bash
-# get a token
-curl -X POST https://finpipeline-production.up.railway.app/auth/login \
+# Set this to localhost or a verified deployed service.
+API_BASE_URL=http://localhost:8000
+
+# Get a token using credentials configured in the environment.
+curl -X POST "$API_BASE_URL/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "adminpassword123"}'
+  -d '{"username": "<AUTH_USERNAME>", "password": "<AUTH_PASSWORD>"}'
 
 # use the token
-curl https://finpipeline-production.up.railway.app/analysis/regime \
+curl "$API_BASE_URL/analysis/regime" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
@@ -126,7 +129,7 @@ You need Python 3.11+, Poetry, and Postgres running locally.
 
 ```bash
 # install dependencies
-poetry install
+poetry install --no-root
 
 # set up your .env
 # DB_HOST=localhost
@@ -134,8 +137,11 @@ poetry install
 # DB_NAME=finpipeline
 # DB_USER=your_username
 # DB_PASSWORD=
+# Alternatively, set DATABASE_URL instead of the five DB_* variables.
 # FRED_API_KEY=your_key_from_fred.stlouisfed.org
 # SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+# AUTH_USERNAME=choose_a_username
+# AUTH_PASSWORD=choose_a_strong_password
 # ALGORITHM=HS256
 # ACCESS_TOKEN_EXPIRE_MINUTES=60
 
@@ -175,6 +181,8 @@ docker run -p 8000:8000 \
   -e DB_PASSWORD= \
   -e FRED_API_KEY=your_key \
   -e SECRET_KEY=your_secret_key \
+  -e AUTH_USERNAME=your_username \
+  -e AUTH_PASSWORD=your_strong_password \
   -e ALGORITHM=HS256 \
   -e ACCESS_TOKEN_EXPIRE_MINUTES=60 \
   finpipeline

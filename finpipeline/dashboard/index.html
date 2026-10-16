@@ -83,7 +83,10 @@
   </div>
 
   <script>
-    const API = 'https://finpipeline-production.up.railway.app';
+    // Override with ?api=https://your-service.up.railway.app when the dashboard
+    // is hosted separately. Same-origin is the safest default.
+    const API = new URLSearchParams(window.location.search).get('api')
+      || (window.location.protocol === 'file:' ? 'http://localhost:8000' : window.location.origin);
 
     let priceChartInstance = null;
     let macroChartInstance = null;

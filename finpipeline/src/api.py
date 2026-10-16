@@ -58,6 +58,29 @@ def run_stock_pipeline():
     logger.info(f"Scheduled stock pipeline done: {result['total_inserted']} records, errors: {result['errors'] or 'none'}")
 
 
+def seed_stock_history_if_empty():
+    """Populate a fresh deployment without delaying API startup."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM stock_prices")
+        if cursor.fetchone()[0] > 0:
+            logger.info("Stock history already present; skipping bootstrap ingestion")
+            return
+    finally:
+        cursor.close()
+        conn.close()
+
+    end = datetime.now().strftime('%Y-%m-%d')
+    start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    logger.info("Fresh database detected; bootstrapping one year of stock history")
+    result = fetch_and_store_stocks(['AAPL', 'GOOGL', 'MSFT', 'TSLA'], start, end)
+    logger.info(
+        f"Bootstrap stock ingestion done: {result['total_inserted']} records, "
+        f"errors: {result['errors'] or 'none'}"
+    )
+
+
 def run_macro_pipeline():
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
@@ -78,6 +101,13 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(run_stock_pipeline, 'cron', hour=18, minute=0)
     scheduler.add_job(run_macro_pipeline, 'cron', day_of_week='mon', hour=9)
     scheduler.add_job(run_regime_update, 'cron', hour=19, minute=0)
+    scheduler.add_job(
+        seed_stock_history_if_empty,
+        'date',
+        run_date=datetime.now() + timedelta(seconds=5),
+        id='bootstrap-stocks',
+        replace_existing=True
+    )
     scheduler.start()
     logger.info("Scheduler started")
     yield
@@ -138,6 +168,18 @@ def me(current_user: str = Depends(get_current_user)):
 
 
 # ── public endpoints ───────────────────────────────────────────────────────
+@app.get("/")
+def service_info():
+    """Human-friendly landing response for the public deployment URL."""
+    return {
+        "service": "FinPipeline",
+        "status": "online",
+        "description": "Financial data pipeline and analytics API",
+        "health": "/health",
+        "documentation": "/docs"
+    }
+
+
 @app.get("/health")
 def health_check():
     """Check if API and database are reachable."""

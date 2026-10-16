@@ -1,6 +1,6 @@
 # finpipeline
 
-A financial data pipeline I built from scratch — pulls real stock and macro data, runs analytics, exposes everything through a REST API, and is packaged for Railway with Docker.
+A financial data pipeline I built from scratch — pulls real stock and macro data, runs analytics, exposes everything through a REST API, and is packaged for portable Docker deployment.
 
 The idea was to build something that actually does useful work: fetch data from Yahoo Finance and the FRED API, store it in Postgres, analyse it, and serve it. The data is real and the analysis is designed to be testable rather than presented as a toy calculation.
 
@@ -18,13 +18,13 @@ The idea was to build something that actually does useful work: fetch data from 
 - Backtests the regime classification to check whether it actually predicts anything
 - Serves all of this through a FastAPI REST API with JWT authentication and rate limiting
 - Runs on a schedule — stock data at 6pm daily, macro data Monday mornings
-- Ready to deploy on Railway with Docker and PostgreSQL
+- Deployable on Render, Railway, or any Docker host with PostgreSQL
 
 ---
 
 ## API
 
-> **Deployment status:** the previous Railway service is offline. A new public URL will be added only after the replacement deployment passes `/health` and endpoint checks.
+> **Live deployment:** [API](https://finpipeline.onrender.com) · [Swagger docs](https://finpipeline.onrender.com/docs) · [Health](https://finpipeline.onrender.com/health)
 
 ### Public endpoints
 

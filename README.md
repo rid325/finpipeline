@@ -26,13 +26,13 @@ The application source, detailed API reference, dashboard, and full local setup 
 
 ## Deployment
 
-The verified public service runs on Render's free web-service tier in Singapore. It applies Alembic migrations before startup and bootstraps one year of stock history when connected to a fresh database. Free instances can take about a minute to wake after inactivity.
+The verified public service runs on Render's free web-service tier in Singapore. It applies Alembic migrations before startup, bootstraps one year of stock history, and loads five years of macro history from FRED when connected to a fresh database. Free instances can take about a minute to wake after inactivity.
 
 ### Deploying on Railway
 
 1. Create a Railway project from this repository and add a PostgreSQL service.
 2. Set `DATABASE_URL` to the PostgreSQL reference variable exposed by Railway.
-3. Add `SECRET_KEY`, `FRED_API_KEY`, `AUTH_USERNAME`, and `AUTH_PASSWORD` as service variables.
+3. Add `SECRET_KEY`, `AUTH_USERNAME`, and `AUTH_PASSWORD` as service variables. `FRED_API_KEY` is optional because the app falls back to FRED's public CSV feed.
 4. Deploy. `railway.toml` runs migrations before startup and binds Uvicorn to Railway's assigned `PORT`.
 5. Verify `/health` and `/docs`, then add the confirmed public URL to this README.
 

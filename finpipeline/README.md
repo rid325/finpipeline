@@ -138,6 +138,7 @@ poetry install --no-root
 # DB_USER=your_username
 # DB_PASSWORD=
 # Alternatively, set DATABASE_URL instead of the five DB_* variables.
+# Optional: without a key, macro data uses FRED's public CSV feed.
 # FRED_API_KEY=your_key_from_fred.stlouisfed.org
 # SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 # AUTH_USERNAME=choose_a_username
@@ -179,7 +180,7 @@ docker run -p 8000:8000 \
   -e DB_NAME=finpipeline \
   -e DB_USER=your_username \
   -e DB_PASSWORD= \
-  -e FRED_API_KEY=your_key \
+  -e FRED_API_KEY=your_optional_key \
   -e SECRET_KEY=your_secret_key \
   -e AUTH_USERNAME=your_username \
   -e AUTH_PASSWORD=your_strong_password \

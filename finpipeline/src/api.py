@@ -59,12 +59,14 @@ def run_stock_pipeline():
 
 
 def seed_stock_history_if_empty():
-    """Populate a fresh deployment without delaying API startup."""
+    """Populate missing tickers without delaying API startup."""
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT COUNT(*) FROM stock_prices")
-        if cursor.fetchone()[0] > 0:
+        cursor.execute("SELECT DISTINCT ticker FROM stock_prices")
+        present_tickers = {row[0] for row in cursor.fetchall()}
+        missing_tickers = sorted(VALID_TICKERS - present_tickers)
+        if not missing_tickers:
             logger.info("Stock history already present; skipping bootstrap ingestion")
             return
     finally:
@@ -73,10 +75,33 @@ def seed_stock_history_if_empty():
 
     end = datetime.now().strftime('%Y-%m-%d')
     start = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-    logger.info("Fresh database detected; bootstrapping one year of stock history")
-    result = fetch_and_store_stocks(['AAPL', 'GOOGL', 'MSFT', 'TSLA'], start, end)
+    logger.info(f"Bootstrapping missing stock history for: {missing_tickers}")
+    result = fetch_and_store_stocks(missing_tickers, start, end)
     logger.info(
         f"Bootstrap stock ingestion done: {result['total_inserted']} records, "
+        f"errors: {result['errors'] or 'none'}"
+    )
+
+
+def seed_macro_history_if_empty():
+    """Populate five years of macro history using FRED API or its CSV feed."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT COUNT(*) FROM economic_indicators")
+        if cursor.fetchone()[0] > 0:
+            logger.info("Macro history already present; skipping bootstrap ingestion")
+            return
+    finally:
+        cursor.close()
+        conn.close()
+
+    end = datetime.now().strftime('%Y-%m-%d')
+    start = (datetime.now() - timedelta(days=365 * 5)).strftime('%Y-%m-%d')
+    logger.info("Fresh database detected; bootstrapping five years of macro history")
+    result = fetch_and_store_indicators(start, end)
+    logger.info(
+        f"Bootstrap macro ingestion done: {result['total_inserted']} records, "
         f"errors: {result['errors'] or 'none'}"
     )
 
@@ -106,6 +131,20 @@ async def lifespan(app: FastAPI):
         'date',
         run_date=datetime.now() + timedelta(seconds=5),
         id='bootstrap-stocks',
+        replace_existing=True
+    )
+    scheduler.add_job(
+        seed_macro_history_if_empty,
+        'date',
+        run_date=datetime.now() + timedelta(seconds=15),
+        id='bootstrap-macro',
+        replace_existing=True
+    )
+    scheduler.add_job(
+        run_regime_update,
+        'date',
+        run_date=datetime.now() + timedelta(seconds=90),
+        id='bootstrap-regimes',
         replace_existing=True
     )
     scheduler.start()

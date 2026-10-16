@@ -1,5 +1,7 @@
 # src/fetchers/macro_fetcher.py
 import requests
+import pandas as pd
+from io import StringIO
 from datetime import datetime
 from src.db import get_connection
 from src.config import FRED_API_KEY
@@ -16,6 +18,21 @@ INDICATORS = {
 
 def fetch_fred_series(series_id: str, start_date: str, end_date: str) -> list:
     """Fetch a single series from FRED API. Returns list of (date, value) tuples."""
+    if not FRED_API_KEY:
+        response = requests.get(
+            "https://fred.stlouisfed.org/graph/fredgraph.csv",
+            params={'id': series_id, 'cosd': start_date, 'coed': end_date},
+            timeout=20
+        )
+        response.raise_for_status()
+        frame = pd.read_csv(StringIO(response.text))
+        value_column = series_id if series_id in frame.columns else frame.columns[-1]
+        frame[value_column] = pd.to_numeric(frame[value_column], errors='coerce')
+        return [
+            (str(row['observation_date']), float(row[value_column]))
+            for _, row in frame.dropna(subset=[value_column]).iterrows()
+        ]
+
     url = "https://api.stlouisfed.org/fred/series/observations"
     params = {
         'series_id': series_id,

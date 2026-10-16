@@ -43,3 +43,14 @@
 - Forward outcomes use 21, 63, and 126 later Nifty trading sessions, not calendar-day guesses, with the sample size stated for every horizon.
 - JSONB named vectors keep the schema explainable and versioned while preserving legacy fingerprint columns during migration.
 - Current FRED revisions are not real-time vintages, so the API and UI state that this is historical analogy—not a forecast, investment advice, or true vintage backtest.
+
+## Phase 4 — methodology and visible freshness
+
+- `/methodology` is the single factual contract for live database counts, source cadence, formulas, validation rules, limitations, and the investment-advice disclaimer.
+- `/freshness` reports every instrument and macro series separately rather than masking an old series behind a recently updated one.
+- Market freshness counts weekdays so a Friday close remains fresh over the weekend; monthly and quarterly macro thresholds reflect publication cadence.
+- Job freshness distinguishes the last successful completion from the last failed or partial completion, and recent detailed runs remain available separately.
+- CPI is labeled as an index level in the selector; price change is labeled “30 sessions,” matching the actual calculation.
+- News reports `not_configured` while publisher permission is absent instead of presenting an empty feed as a live news product.
+- Dashboard loaders settle independently so a missing optional dataset does not leave otherwise healthy panels stuck in loading state.
+- Marketing claims were replaced with measured database counts, explicit formulas, upstream-delay expectations, and known limitations.

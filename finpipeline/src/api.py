@@ -32,6 +32,7 @@ from src.config import ENABLE_APSCHEDULER
 from src.instruments import list_instruments, list_macro_series
 from src.news import FEEDS, get_move_days, query_news
 from src.regime_v2 import compute_regime_current
+from src.methodology import get_freshness, get_methodology
 
 
 # ── structured JSON logging ────────────────────────────────────────────────
@@ -272,6 +273,12 @@ def metrics():
 
         cursor.execute("SELECT MAX(date) FROM stock_prices")
         latest_stock_date = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM instruments WHERE active=TRUE")
+        instrument_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM macro_series WHERE active=TRUE")
+        series_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM news_articles")
+        news_count = cursor.fetchone()[0]
         cursor.close()
         conn.close()
 
@@ -279,7 +286,10 @@ def metrics():
             "database": {
                 "stock_prices_count": stock_count,
                 "economic_indicators_count": indicator_count,
-                "latest_stock_date": str(latest_stock_date) if latest_stock_date else None
+                "latest_stock_date": str(latest_stock_date) if latest_stock_date else None,
+                "active_instruments_count": instrument_count,
+                "active_macro_series_count": series_count,
+                "news_articles_count": news_count,
             },
             "pipeline": pipeline_stats
         }
@@ -468,6 +478,18 @@ def india_regime_current():
     except Exception as error:
         logger.error(f"Error computing India regime: {error}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/freshness")
+def freshness():
+    """Per-instrument, per-series, and per-job freshness without hiding stale data."""
+    return get_freshness()
+
+
+@app.get("/methodology")
+def methodology():
+    """Machine-readable formulas, sources, validation, and limitations."""
+    return get_methodology()
 
 
 # ── protected analysis endpoints ───────────────────────────────────────────

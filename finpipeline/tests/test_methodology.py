@@ -1,7 +1,12 @@
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from src.methodology import age_freshness, job_freshness, market_freshness
+from src.methodology import (
+    age_freshness,
+    build_job_freshness,
+    job_freshness,
+    market_freshness,
+)
 
 
 def test_friday_market_data_is_fresh_over_weekend():
@@ -66,6 +71,14 @@ def test_backfill_is_completed_not_eventually_stale():
     assert result["status"] == "completed"
     assert result["expected_cadence"] == "one-time backfill"
     assert result["fresh_threshold"] is None
+
+
+def test_expected_jobs_are_visible_before_first_run():
+    jobs = build_job_freshness([], datetime(2026, 10, 17, tzinfo=timezone.utc))
+    assert {job["job_name"] for job in jobs} == {
+        "macro-all", "market-global", "market-india", "regime-india-us-v1",
+    }
+    assert {job["status"] for job in jobs} == {"never_succeeded"}
 
 
 def test_dashboard_renders_per_job_freshness_contract():

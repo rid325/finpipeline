@@ -14,6 +14,12 @@ DEFAULT_JOB_CADENCE = {
     "fresh_threshold": 36,
     "delayed_threshold": 72,
 }
+SCHEDULED_JOB_NAMES = (
+    "macro-all",
+    "market-global",
+    "market-india",
+    "regime-india-us-v1",
+)
 
 
 def _job_cadence(job_name: str) -> dict:
@@ -86,6 +92,21 @@ def job_freshness(
     return result
 
 
+def build_job_freshness(rows: list[tuple], now: datetime) -> list[dict]:
+    """Include expected jobs even before their first named pipeline run."""
+    runs = {job_name: (last_success, last_problem) for job_name, last_success, last_problem in rows}
+    jobs = []
+    for job_name in sorted(set(SCHEDULED_JOB_NAMES) | set(runs)):
+        last_success, last_problem = runs.get(job_name, (None, None))
+        jobs.append({
+            "job_name": job_name,
+            "last_successful_run": last_success.isoformat() if last_success else None,
+            "last_problem_run": last_problem.isoformat() if last_problem else None,
+            **job_freshness(job_name, last_success, last_problem, now),
+        })
+    return jobs
+
+
 def market_freshness(as_of: date | None, today: date) -> str:
     if as_of is None:
         return "never_loaded"
@@ -133,14 +154,7 @@ def get_freshness() -> dict:
                MAX(completed_at) FILTER (WHERE status IN ('failed','partial'))
         FROM pipeline_runs WHERE job_name IS NOT NULL GROUP BY job_name ORDER BY job_name
     """)
-    jobs = []
-    for job_name, last_success, last_problem in cursor.fetchall():
-        jobs.append({
-            "job_name": job_name,
-            "last_successful_run": last_success.isoformat() if last_success else None,
-            "last_problem_run": last_problem.isoformat() if last_problem else None,
-            **job_freshness(job_name, last_success, last_problem, now),
-        })
+    jobs = build_job_freshness(cursor.fetchall(), now)
     cursor.execute("SELECT MAX(published_at), COUNT(*) FROM news_articles")
     latest_news, news_count = cursor.fetchone()
     cursor.close(); conn.close()

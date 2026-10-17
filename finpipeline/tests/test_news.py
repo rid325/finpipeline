@@ -2,6 +2,7 @@ import pandas as pd
 
 from src.news import (
     calculate_move_days,
+    move_days_in_window,
     normalize_url,
     tag_headline,
     titles_are_near_duplicates,
@@ -44,3 +45,19 @@ def test_move_detection_uses_only_prior_90_returns_for_threshold():
 
     assert moves.iloc[-1]["date"] == frame.iloc[-1]["date"]
     assert round(moves.iloc[-1]["daily_return"], 4) == 0.1
+
+
+def test_move_window_excludes_old_events_but_keeps_lookback_context():
+    returns = [0.01 if index % 2 else -0.01 for index in range(95)]
+    returns += [0.12]
+    returns += [0.01 if index % 2 else -0.01 for index in range(30)]
+    closes = [100.0]
+    for value in returns:
+        closes.append(closes[-1] * (1 + value))
+    frame = pd.DataFrame({"date": pd.date_range("2025-01-01", periods=len(closes)), "close": closes})
+
+    all_moves = calculate_move_days(frame)
+    recent_moves = move_days_in_window(frame, days=30)
+
+    assert not all_moves.empty
+    assert recent_moves.empty

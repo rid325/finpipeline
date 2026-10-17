@@ -67,3 +67,12 @@
 - README architecture, endpoints, source licensing, environment variables, and deployment steps now match the code and workflows.
 - Full end-to-end source ingestion remains an operator action because CI must not depend on Yahoo/FRED availability or production secrets.
 - `httpx` is development-only and exists solely to exercise FastAPI routes through its supported test client.
+
+## Final verification fixes
+
+- India and global market schedules now gate on their own post-close cron, avoiding a premature global run and a duplicate India run.
+- Manual market and macro dispatches accept an explicit backfill flag, so first population does not depend on a Render shell or sleeping web process.
+- Job freshness is evaluated against declared cadence and exposes fresh, delayed, stale, problem, never-succeeded, and one-time-completed states.
+- Move-day results retain 90-session threshold context but are filtered to the requested output window, preventing older events from leaking into the response.
+- The integration test now calls the real ingestion function twice; holiday behavior is checked by proving absent exchange sessions are never synthesized.
+- Dashboard regime and job panels use explicit loading, wake, insufficient-history, and API-error states instead of indefinite placeholder text.

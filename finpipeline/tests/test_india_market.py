@@ -32,6 +32,25 @@ def test_missing_adjusted_close_falls_back_to_raw_close():
     assert normalized.loc[0, "adj close"] == 101
 
 
+def test_missing_holiday_session_is_not_invented():
+    index = pd.DatetimeIndex(
+        ["2026-10-16 00:00:00", "2026-10-20 00:00:00"],
+        tz="Asia/Kolkata",
+        name="Date",
+    )
+    frame = pd.DataFrame(
+        {
+            "Open": [100, 102], "High": [103, 104], "Low": [99, 101],
+            "Close": [102, 103], "Adj Close": [102, 103], "Volume": [10, 12],
+        },
+        index=index,
+    )
+
+    normalized = normalize_yahoo_history(frame, "^NSEI", "Asia/Kolkata")
+
+    assert normalized["date"].tolist() == [date(2026, 10, 16), date(2026, 10, 20)]
+
+
 @pytest.mark.parametrize("ticker", ["^NSEI", "RELIANCE.NS", "USDINR=X", "BZ=F"])
 def test_yahoo_symbols_are_accepted_by_validation(ticker):
     assert validate_ticker(ticker, {ticker}) == ticker

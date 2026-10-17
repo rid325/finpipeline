@@ -2,6 +2,12 @@ name: Macro ingestion
 
 on:
   workflow_dispatch:
+    inputs:
+      backfill:
+        description: Fetch ten years instead of the rolling daily window
+        required: true
+        default: false
+        type: boolean
   schedule:
     - cron: "43 2 * * *"
 
@@ -28,7 +34,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
-        run: PYTHONPATH=finpipeline poetry run python -m src.jobs run macro
+        run: PYTHONPATH=finpipeline poetry run python -m src.jobs run macro ${{ inputs.backfill && '--backfill' || '' }}
       - name: Refresh no-lookahead regime fingerprints
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

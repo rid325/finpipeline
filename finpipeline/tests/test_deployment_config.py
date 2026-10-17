@@ -1,4 +1,8 @@
 import importlib
+from pathlib import Path
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
 class FakeCursor:
@@ -131,3 +135,20 @@ def test_auth_user_comes_from_environment(monkeypatch):
     assert auth.verify_password(
         "not-checked-in", auth.USERS["portfolio-reviewer"]["hashed_password"]
     )
+
+
+def test_market_workflow_separates_exchange_close_schedules_and_supports_backfill():
+    workflow = (REPOSITORY_ROOT / ".github/workflows/market-ingestion.yml").read_text()
+
+    assert "github.event.schedule == '37 10 * * 1-5'" in workflow
+    assert "github.event.schedule == '37 22 * * 1-5'" in workflow
+    assert "inputs.market == 'india'" in workflow
+    assert "inputs.market == 'global'" in workflow
+    assert workflow.count("inputs.backfill && '--backfill'") == 2
+
+
+def test_macro_workflow_supports_manual_backfill():
+    workflow = (REPOSITORY_ROOT / ".github/workflows/macro-ingestion.yml").read_text()
+
+    assert "description: Fetch ten years" in workflow
+    assert "inputs.backfill && '--backfill'" in workflow

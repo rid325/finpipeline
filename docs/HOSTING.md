@@ -6,6 +6,12 @@ FinPipeline uses three independent free services:
 2. **GitHub Actions** runs ingestion even while the Render service sleeps. Add both URLs as repository Actions secrets; `FRED_API_KEY` is optional.
 3. **Render** serves the API and dashboard. Set both database URLs, `SECRET_KEY`, and `ENABLE_APSCHEDULER=false`.
 
+After migration, manually dispatch the market workflow with `market=both` and
+`backfill=true`, then dispatch the macro workflow with `backfill=true`. The two
+scheduled market jobs are intentionally separate: India runs after the NSE close,
+and global runs after the US close. Confirm the backfills in `/pipeline/runs` and
+`/freshness` before treating the deployment as populated.
+
 ## Move the current database to Neon
 
 ```bash

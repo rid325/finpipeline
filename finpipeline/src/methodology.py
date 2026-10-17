@@ -8,6 +8,84 @@ from src.regime_v2 import CAVEAT, FEATURES, METHOD_VERSION
 from src.config import NEWS_FEEDS_ENABLED
 
 
+DEFAULT_JOB_CADENCE = {
+    "expected_cadence": "daily",
+    "threshold_unit": "hours",
+    "fresh_threshold": 36,
+    "delayed_threshold": 72,
+}
+
+
+def _job_cadence(job_name: str) -> dict:
+    if job_name.endswith("-backfill") or "bootstrap" in job_name:
+        return {
+            "expected_cadence": "one-time backfill",
+            "threshold_unit": None,
+            "fresh_threshold": None,
+            "delayed_threshold": None,
+        }
+    if job_name.startswith("market-"):
+        return {
+            "expected_cadence": "weekdays after exchange close",
+            "threshold_unit": "business_days",
+            "fresh_threshold": 1,
+            "delayed_threshold": 2,
+        }
+    if job_name == "news-india":
+        return {
+            "expected_cadence": "every 4 hours when licensed feeds are enabled",
+            "threshold_unit": "hours",
+            "fresh_threshold": 6,
+            "delayed_threshold": 12,
+        }
+    if job_name.startswith("macro-") or job_name.startswith("regime-"):
+        return DEFAULT_JOB_CADENCE.copy()
+    return DEFAULT_JOB_CADENCE.copy()
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def job_freshness(
+    job_name: str,
+    last_success: datetime | None,
+    last_problem: datetime | None,
+    now: datetime,
+) -> dict:
+    """Describe a job against its declared cadence without hiding newer failures."""
+    cadence = _job_cadence(job_name)
+    last_success = _as_utc(last_success)
+    last_problem = _as_utc(last_problem)
+    now = _as_utc(now)
+    result = {**cadence, "age": None}
+    if last_success is None:
+        result["status"] = "problem" if last_problem else "never_succeeded"
+        return result
+    if last_problem and last_problem > last_success:
+        result["status"] = "problem"
+        return result
+    if cadence["expected_cadence"] == "one-time backfill":
+        result["status"] = "completed"
+        return result
+    if cadence["threshold_unit"] == "business_days":
+        age = max(len(pd.bdate_range(last_success.date(), now.date())) - 1, 0)
+    else:
+        age = max((now - last_success).total_seconds() / 3600, 0)
+        age = round(age, 1)
+    result["age"] = age
+    result["status"] = (
+        "fresh" if age <= cadence["fresh_threshold"]
+        else "delayed" if age <= cadence["delayed_threshold"]
+        else "stale"
+    )
+    return result
+
+
 def market_freshness(as_of: date | None, today: date) -> str:
     if as_of is None:
         return "never_loaded"
@@ -27,7 +105,7 @@ def age_freshness(as_of: date | None, today: date, frequency: str) -> str:
 
 
 def get_freshness() -> dict:
-    conn = get_connection(); cursor = conn.cursor(); today = datetime.now(timezone.utc).date()
+    conn = get_connection(); cursor = conn.cursor(); now = datetime.now(timezone.utc); today = now.date()
     cursor.execute("""
         SELECT i.ticker, i.market, MAX(p.date)
         FROM instruments i LEFT JOIN stock_prices p ON p.ticker=i.ticker
@@ -55,16 +133,19 @@ def get_freshness() -> dict:
                MAX(completed_at) FILTER (WHERE status IN ('failed','partial'))
         FROM pipeline_runs WHERE job_name IS NOT NULL GROUP BY job_name ORDER BY job_name
     """)
-    jobs = [
-        {"job_name": row[0], "last_successful_run": row[1].isoformat() if row[1] else None,
-         "last_problem_run": row[2].isoformat() if row[2] else None}
-        for row in cursor.fetchall()
-    ]
+    jobs = []
+    for job_name, last_success, last_problem in cursor.fetchall():
+        jobs.append({
+            "job_name": job_name,
+            "last_successful_run": last_success.isoformat() if last_success else None,
+            "last_problem_run": last_problem.isoformat() if last_problem else None,
+            **job_freshness(job_name, last_success, last_problem, now),
+        })
     cursor.execute("SELECT MAX(published_at), COUNT(*) FROM news_articles")
     latest_news, news_count = cursor.fetchone()
     cursor.close(); conn.close()
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": now.isoformat(),
         "instruments": instruments, "macro_series": macro,
         "news": {"configured": bool(NEWS_FEEDS_ENABLED), "article_count": news_count,
                  "as_of": latest_news.isoformat() if latest_news else None,

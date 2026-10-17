@@ -78,7 +78,7 @@ The regime response is historical similarity on a small, revised-data sample—n
 2. Back up the old database with `MIGRATION_DATABASE_URL="$OLD_URL" ./scripts/backup_db.sh current.dump`.
 3. Restore with `MIGRATION_DATABASE_URL="$NEON_DIRECT_URL" ./scripts/restore_db.sh current.dump`, then run Alembic to head.
 4. In Render, apply `render.yaml`; set both URLs and `ENABLE_APSCHEDULER=false`. Verify `/health`, `/freshness`, and live database counts before retiring the old database.
-5. Add `DATABASE_URL`, `MIGRATION_DATABASE_URL`, and optional `FRED_API_KEY` as GitHub Actions secrets. Run each workflow manually once, then inspect `/pipeline/runs`.
+5. Add `DATABASE_URL`, `MIGRATION_DATABASE_URL`, and optional `FRED_API_KEY` as GitHub Actions secrets. Manually dispatch **Market ingestion** with `market=both` and `backfill=true`, then dispatch **Macro ingestion** with `backfill=true`. Later scheduled runs use the short rolling windows. Inspect `/pipeline/runs` before relying on the dashboard.
 6. Add a low-frequency uptime check if you want fewer visible Render cold starts. It is not required for ingestion.
 7. GitHub may disable public-repository schedules after 60 days without repository activity. Set an external reminder before day 60 and re-enable/manual-dispatch workflows if needed.
 

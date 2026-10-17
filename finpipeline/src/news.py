@@ -193,6 +193,16 @@ def calculate_move_days(prices: pd.DataFrame, sigma: float = 2.0, lookback: int 
     return frame[frame["is_move"]].copy()
 
 
+def move_days_in_window(
+    prices: pd.DataFrame, days: int, sigma: float = 2.0, lookback: int = 90,
+) -> pd.DataFrame:
+    """Detect moves with lookback context, then keep only the requested sessions."""
+    ordered = prices.sort_values("date")
+    requested_dates = set(ordered.tail(days)["date"])
+    moves = calculate_move_days(ordered, sigma=sigma, lookback=lookback)
+    return moves[moves["date"].isin(requested_dates)].copy()
+
+
 def query_news(
     ticker: str | None = None, sector: str | None = None,
     from_date: str | None = None, to_date: str | None = None,
@@ -252,7 +262,7 @@ def get_move_days(ticker: str, days: int = 365) -> list[dict]:
         cursor.close(); conn.close()
         return []
     prices["close"] = prices["close"].astype(float)
-    moves = calculate_move_days(prices).tail(days)
+    moves = move_days_in_window(prices, days)
     output = []
     for _, move in moves.iterrows():
         cursor.execute("""

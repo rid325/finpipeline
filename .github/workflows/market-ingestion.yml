@@ -2,6 +2,21 @@ name: Market ingestion
 
 on:
   workflow_dispatch:
+    inputs:
+      market:
+        description: Market job to run
+        required: true
+        default: both
+        type: choice
+        options:
+          - both
+          - india
+          - global
+      backfill:
+        description: Fetch five years instead of the rolling daily window
+        required: true
+        default: false
+        type: boolean
   schedule:
     # 10:37 UTC is 16:07 IST, safely after the 15:30 NSE close.
     - cron: "37 10 * * 1-5"
@@ -13,7 +28,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  ingest:
+  india:
+    if: github.event_name == 'schedule' && github.event.schedule == '37 10 * * 1-5' || github.event_name == 'workflow_dispatch' && (inputs.market == 'india' || inputs.market == 'both')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -30,8 +46,24 @@ jobs:
       - name: Run idempotent India market job
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: PYTHONPATH=finpipeline poetry run python -m src.jobs run market --market india
+        run: PYTHONPATH=finpipeline poetry run python -m src.jobs run market --market india ${{ inputs.backfill && '--backfill' || '' }}
+
+  global:
+    if: github.event_name == 'schedule' && github.event.schedule == '37 22 * * 1-5' || github.event_name == 'workflow_dispatch' && (inputs.market == 'global' || inputs.market == 'both')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pipx install poetry
+      - run: poetry install --no-interaction --no-root
+      - name: Apply migrations using direct Neon connection
+        env:
+          MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
+        run: poetry run alembic -c finpipeline/alembic.ini upgrade head
       - name: Run idempotent global market job
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: PYTHONPATH=finpipeline poetry run python -m src.jobs run market --market global
+        run: PYTHONPATH=finpipeline poetry run python -m src.jobs run market --market global ${{ inputs.backfill && '--backfill' || '' }}

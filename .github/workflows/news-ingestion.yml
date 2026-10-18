@@ -11,20 +11,39 @@ concurrency:
 
 jobs:
   ingest:
+    if: vars.NEWS_FEEDS_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check database configuration
+        id: database
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$MIGRATION_DATABASE_URL" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Ingestion paused::Add DATABASE_URL and MIGRATION_DATABASE_URL repository secrets before enabling scheduled ingestion."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.database.outputs.ready == 'true'
+        uses: actions/checkout@v4
+      - if: steps.database.outputs.ready == 'true'
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pipx install poetry
-      - run: poetry install --no-interaction --no-root
+      - if: steps.database.outputs.ready == 'true'
+        run: pipx install poetry
+      - if: steps.database.outputs.ready == 'true'
+        run: poetry install --no-interaction --no-root
       - name: Apply migrations
+        if: steps.database.outputs.ready == 'true'
         env:
           MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
         run: poetry run alembic -c finpipeline/alembic.ini upgrade head
       - name: Run licensed-opt-in feeds
+        if: steps.database.outputs.ready == 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           NEWS_FEEDS_ENABLED: ${{ vars.NEWS_FEEDS_ENABLED }}

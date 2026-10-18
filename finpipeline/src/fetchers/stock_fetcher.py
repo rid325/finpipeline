@@ -6,7 +6,7 @@ import time
 from psycopg2.extras import execute_values
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-from src.db import get_connection
+from src.db import fail_stale_pipeline_runs, get_connection
 
 
 def fetch_yahoo_chart_history(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
@@ -70,6 +70,7 @@ def fetch_and_store_stocks(
     # log that pipeline started
     started_at = datetime.now(timezone.utc)
     started_clock = time.monotonic()
+    fail_stale_pipeline_runs(cursor, 'yahoo_finance', started_at)
     cursor.execute("""
         INSERT INTO pipeline_runs (source, job_name, status, started_at)
         VALUES (%s, %s, %s, %s)

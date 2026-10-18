@@ -1,5 +1,6 @@
 import psycopg2
 import time
+from datetime import datetime
 from src.config import (
     DATABASE_URL, DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD,
     DB_CONNECT_RETRIES, DB_CONNECT_TIMEOUT,
@@ -42,6 +43,24 @@ def get_connection():
             if attempt < DB_CONNECT_RETRIES:
                 time.sleep(attempt + 1)
     raise last_error
+
+
+def fail_stale_pipeline_runs(cursor, source: str, as_of: datetime) -> int:
+    """Close runs abandoned by a cancelled worker before recording a new run."""
+    cursor.execute("""
+        UPDATE pipeline_runs
+        SET status = 'failed',
+            error_message = COALESCE(error_message, 'Interrupted before completion'),
+            completed_at = COALESCE(completed_at, %s),
+            duration_ms = COALESCE(
+                duration_ms,
+                (EXTRACT(EPOCH FROM (%s - started_at)) * 1000)::BIGINT
+            )
+        WHERE source = %s
+          AND status = 'running'
+          AND started_at < %s - INTERVAL '30 minutes'
+    """, (as_of, as_of, source, as_of))
+    return cursor.rowcount
 
 
 def test_connection():

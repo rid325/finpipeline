@@ -1,4 +1,5 @@
 import importlib
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -90,6 +91,24 @@ def test_connection_retries_a_sleeping_database(monkeypatch):
     assert attempts[0][0][0].startswith("postgresql://")
     assert len(attempts) == 2
     assert sleeps == [1]
+
+
+def test_stale_pipeline_runs_are_closed_before_a_new_run():
+    import src.db as db
+
+    class Cursor:
+        rowcount = 2
+
+        def execute(self, query, params):
+            self.query = query
+            self.params = params
+
+    cursor = Cursor()
+    as_of = datetime(2026, 10, 18, tzinfo=timezone.utc)
+
+    assert db.fail_stale_pipeline_runs(cursor, "yahoo_finance", as_of) == 2
+    assert "INTERVAL '30 minutes'" in cursor.query
+    assert cursor.params == (as_of, as_of, "yahoo_finance", as_of)
 
 
 def test_job_cli_returns_nonzero_when_a_job_reports_errors(monkeypatch, capsys):

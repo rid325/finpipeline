@@ -45,11 +45,19 @@ def get_connection():
     raise last_error
 
 
-def fail_stale_pipeline_runs(cursor, source: str, as_of: datetime) -> int:
+def close_stale_pipeline_runs(cursor, source: str, as_of: datetime) -> int:
     """Close runs abandoned by a cancelled worker before recording a new run."""
     cursor.execute("""
         UPDATE pipeline_runs
-        SET status = 'failed',
+        SET status = 'cancelled'
+        WHERE source = %s
+          AND status = 'failed'
+          AND error_message = 'Interrupted before completion'
+    """, (source,))
+    corrected_runs = cursor.rowcount
+    cursor.execute("""
+        UPDATE pipeline_runs
+        SET status = 'cancelled',
             error_message = COALESCE(error_message, 'Interrupted before completion'),
             completed_at = COALESCE(completed_at, %s),
             duration_ms = COALESCE(
@@ -60,7 +68,7 @@ def fail_stale_pipeline_runs(cursor, source: str, as_of: datetime) -> int:
           AND status = 'running'
           AND started_at < %s - INTERVAL '30 minutes'
     """, (as_of, as_of, source, as_of))
-    return cursor.rowcount
+    return corrected_runs + cursor.rowcount
 
 
 def test_connection():

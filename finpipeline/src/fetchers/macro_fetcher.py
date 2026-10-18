@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import time
 import csv
 from pathlib import Path
-from src.db import fail_stale_pipeline_runs, get_connection
+from src.db import close_stale_pipeline_runs, get_connection
 from src.config import FRED_API_KEY
 from src.instruments import list_macro_series
 
@@ -84,7 +84,7 @@ def fetch_and_store_indicators(
 
     started_at = datetime.now(timezone.utc)
     started_clock = time.monotonic()
-    fail_stale_pipeline_runs(cursor, 'fred', started_at)
+    close_stale_pipeline_runs(cursor, 'fred', started_at)
     cursor.execute("""
         INSERT INTO pipeline_runs (source, job_name, status, started_at)
         VALUES (%s, %s, %s, %s)

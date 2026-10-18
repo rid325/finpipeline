@@ -106,7 +106,7 @@ def test_stale_pipeline_runs_are_closed_before_a_new_run():
     cursor = Cursor()
     as_of = datetime(2026, 10, 18, tzinfo=timezone.utc)
 
-    assert db.fail_stale_pipeline_runs(cursor, "yahoo_finance", as_of) == 2
+    assert db.close_stale_pipeline_runs(cursor, "yahoo_finance", as_of) == 4
     assert "INTERVAL '30 minutes'" in cursor.query
     assert cursor.params == (as_of, as_of, "yahoo_finance", as_of)
 

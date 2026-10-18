@@ -1,6 +1,7 @@
 # src/fetchers/macro_fetcher.py
 import requests
 import pandas as pd
+from psycopg2.extras import execute_values
 from io import StringIO
 from datetime import datetime, timezone
 import time
@@ -106,27 +107,27 @@ def fetch_and_store_indicators(
                 else fetch_fred_series(series_id, start_date, end_date)
             )
 
-            cursor.execute("SAVEPOINT macro_rows")
+            rows = []
             for date_str, value in observations:
                 if not validate_indicator_row(name, date_str, value):
                     errors.append(f"{name} {date_str}: failed validation (value={value})")
                     continue
+                rows.append((
+                    name, date_str, value, series_id, series["market"],
+                    series["source"], series["manually_curated"]
+                ))
 
-                cursor.execute("""
+            if rows:
+                execute_values(cursor, """
                     INSERT INTO economic_indicators
                         (indicator, date, value, series_id, market, source, manually_curated)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    VALUES %s
                     ON CONFLICT ON CONSTRAINT uq_indicator_date DO UPDATE SET
                         value = EXCLUDED.value, series_id = EXCLUDED.series_id,
                         market = EXCLUDED.market, source = EXCLUDED.source,
                         manually_curated = EXCLUDED.manually_curated, updated_at = NOW()
-                """, (
-                    name, date_str, value, series_id, series["market"],
-                    series["source"], series["manually_curated"]
-                ))
-                total_inserted += cursor.rowcount
-
-            cursor.execute("RELEASE SAVEPOINT macro_rows")
+                """, rows, page_size=500)
+                total_inserted += len(rows)
 
             conn.commit()
             print(f"  {name}: {len(observations)} observations stored")

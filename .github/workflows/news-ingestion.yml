@@ -6,7 +6,7 @@ on:
     - cron: "17 */4 * * *"
 
 concurrency:
-  group: news-ingestion
+  group: finpipeline-ingestion
   cancel-in-progress: false
 
 jobs:

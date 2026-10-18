@@ -12,7 +12,7 @@ on:
     - cron: "43 2 * * *"
 
 concurrency:
-  group: macro-ingestion
+  group: finpipeline-ingestion
   cancel-in-progress: false
 
 jobs:

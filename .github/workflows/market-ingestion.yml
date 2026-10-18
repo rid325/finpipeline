@@ -24,14 +24,15 @@ on:
     - cron: "37 22 * * 1-5"
 
 concurrency:
-  group: market-ingestion
+  group: finpipeline-ingestion
   cancel-in-progress: false
 
 jobs:
-  india:
-    if: github.event_name == 'schedule' && github.event.schedule == '37 10 * * 1-5' || github.event_name == 'workflow_dispatch' && (inputs.market == 'india' || inputs.market == 'both')
+  migrate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
+    outputs:
+      ready: ${{ steps.database.outputs.ready }}
     steps:
       - name: Check database configuration
         id: database
@@ -55,51 +56,42 @@ jobs:
         run: pipx install poetry
       - if: steps.database.outputs.ready == 'true'
         run: poetry install --no-interaction --no-root
-      - name: Apply migrations using direct Neon connection
+      - name: Apply migrations using configured Neon connection
         if: steps.database.outputs.ready == 'true'
         env:
           MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
         run: poetry run alembic -c finpipeline/alembic.ini upgrade head
+
+  india:
+    needs: migrate
+    if: needs.migrate.outputs.ready == 'true' && (github.event_name == 'schedule' && github.event.schedule == '37 10 * * 1-5' || github.event_name == 'workflow_dispatch' && (inputs.market == 'india' || inputs.market == 'both'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pipx install poetry
+      - run: poetry install --no-interaction --no-root
       - name: Run idempotent India market job
-        if: steps.database.outputs.ready == 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: PYTHONPATH=finpipeline poetry run python -m src.jobs run market --market india ${{ inputs.backfill && '--backfill' || '' }}
 
   global:
-    if: github.event_name == 'schedule' && github.event.schedule == '37 22 * * 1-5' || github.event_name == 'workflow_dispatch' && (inputs.market == 'global' || inputs.market == 'both')
+    needs: migrate
+    if: needs.migrate.outputs.ready == 'true' && (github.event_name == 'schedule' && github.event.schedule == '37 22 * * 1-5' || github.event_name == 'workflow_dispatch' && (inputs.market == 'global' || inputs.market == 'both'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Check database configuration
-        id: database
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
-        run: |
-          if [ -z "$DATABASE_URL" ] || [ -z "$MIGRATION_DATABASE_URL" ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Ingestion paused::Add DATABASE_URL and MIGRATION_DATABASE_URL repository secrets before enabling scheduled ingestion."
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
-      - if: steps.database.outputs.ready == 'true'
-        uses: actions/checkout@v4
-      - if: steps.database.outputs.ready == 'true'
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - if: steps.database.outputs.ready == 'true'
-        run: pipx install poetry
-      - if: steps.database.outputs.ready == 'true'
-        run: poetry install --no-interaction --no-root
-      - name: Apply migrations using direct Neon connection
-        if: steps.database.outputs.ready == 'true'
-        env:
-          MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
-        run: poetry run alembic -c finpipeline/alembic.ini upgrade head
+      - run: pipx install poetry
+      - run: poetry install --no-interaction --no-root
       - name: Run idempotent global market job
-        if: steps.database.outputs.ready == 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: PYTHONPATH=finpipeline poetry run python -m src.jobs run market --market global ${{ inputs.backfill && '--backfill' || '' }}

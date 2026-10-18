@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import requests
 import time
+from psycopg2.extras import execute_values
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from src.db import get_connection
@@ -106,27 +107,28 @@ def fetch_and_store_stocks(
                 df, ticker, (timezones or {}).get(ticker, 'UTC')
             )
 
-            cursor.execute("SAVEPOINT instrument_rows")
+            rows = []
             for _, row in df.iterrows():
                 prices = [float(row[name]) for name in ('open', 'high', 'low', 'close')]
                 if not all(pd.notna(value) and value >= 0 for value in prices):
                     raise ValueError(f"invalid OHLC values on {row['date']}")
                 volume = None if pd.isna(row.get('volume')) else int(row['volume'])
-                cursor.execute("""
-                    INSERT INTO stock_prices
-                        (ticker, date, open, high, low, close, adjusted_close, volume)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT ON CONSTRAINT uq_ticker_date DO UPDATE SET
-                        open = EXCLUDED.open, high = EXCLUDED.high,
-                        low = EXCLUDED.low, close = EXCLUDED.close,
-                        adjusted_close = EXCLUDED.adjusted_close,
-                        volume = EXCLUDED.volume, updated_at = NOW()
-                """, (
+                rows.append((
                     row['ticker'], row['date'], *prices,
                     float(row['adj close']), volume
                 ))
-                total_inserted += cursor.rowcount
-            cursor.execute("RELEASE SAVEPOINT instrument_rows")
+
+            execute_values(cursor, """
+                INSERT INTO stock_prices
+                    (ticker, date, open, high, low, close, adjusted_close, volume)
+                VALUES %s
+                ON CONFLICT ON CONSTRAINT uq_ticker_date DO UPDATE SET
+                    open = EXCLUDED.open, high = EXCLUDED.high,
+                    low = EXCLUDED.low, close = EXCLUDED.close,
+                    adjusted_close = EXCLUDED.adjusted_close,
+                    volume = EXCLUDED.volume, updated_at = NOW()
+            """, rows, page_size=500)
+            total_inserted += len(rows)
 
             conn.commit()
             print(f"  {ticker}: {len(df)} rows processed")

@@ -76,7 +76,7 @@ def test_backfill_is_completed_not_eventually_stale():
 def test_expected_jobs_are_visible_before_first_run():
     jobs = build_job_freshness([], datetime(2026, 10, 17, tzinfo=timezone.utc))
     assert {job["job_name"] for job in jobs} == {
-        "macro-all", "market-global", "market-india", "regime-india-us-v1",
+        "macro-all", "market-global", "market-india", "news-india", "regime-india-us-v1",
     }
     assert {job["status"] for job in jobs} == {"never_succeeded"}
 

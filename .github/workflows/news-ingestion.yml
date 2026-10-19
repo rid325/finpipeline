@@ -11,7 +11,6 @@ concurrency:
 
 jobs:
   ingest:
-    if: vars.NEWS_FEEDS_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -42,7 +41,7 @@ jobs:
         env:
           MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
         run: poetry run alembic -c finpipeline/alembic.ini upgrade head
-      - name: Run licensed-opt-in feeds
+      - name: Run verified RSS feeds
         if: steps.database.outputs.ready == 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

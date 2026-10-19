@@ -1,4 +1,4 @@
-"""Licensed-opt-in RSS ingestion, deterministic tagging, and move-day joins."""
+"""RSS headline ingestion, deterministic tagging, and move-day joins."""
 from __future__ import annotations
 
 import calendar
@@ -21,22 +21,17 @@ FEEDS = {
     "economic-times-markets": {
         "source": "Economic Times Markets",
         "url": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
-        "status": "license_required",
+        "status": "active",
     },
     "mint-markets": {
         "source": "Mint Markets",
         "url": "https://www.livemint.com/rss/markets",
-        "status": "license_required",
+        "status": "active",
     },
     "business-standard-markets": {
         "source": "Business Standard Markets",
         "url": "https://www.business-standard.com/rss/markets-106.rss",
-        "status": "license_required",
-    },
-    "moneycontrol-markets": {
-        "source": "Moneycontrol Markets",
-        "url": None,
-        "status": "unavailable_http_403",
+        "status": "active",
     },
 }
 
@@ -45,7 +40,7 @@ ALIASES = {
     "^BSESN": ["Sensex", "BSE Sensex"],
     "^NSEBANK": ["Bank Nifty", "Nifty Bank"],
     "^INDIAVIX": ["India VIX"],
-    "RELIANCE.NS": ["Reliance Industries", "Reliance"],
+    "RELIANCE.NS": ["Reliance Industries", "Reliance", "Jio", "RIL"],
     "TCS.NS": ["Tata Consultancy Services", "TCS"],
     "HDFCBANK.NS": ["HDFC Bank"],
     "INFY.NS": ["Infosys"],
@@ -58,7 +53,7 @@ ALIASES = {
 }
 
 SECTOR_ALIASES = {
-    "financials": ["bank", "banks", "banking", "financials"],
+    "financials": ["bank", "banks", "banking", "finance", "financials", "lender", "lenders"],
     "technology": ["IT sector", "technology", "software"],
     "energy": ["oil", "crude", "energy"],
     "consumer": ["FMCG", "consumer goods"],
@@ -67,6 +62,7 @@ SECTOR_ALIASES = {
 }
 
 TRACKING_PARAMS = {"utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "gclid", "fbclid"}
+MAX_FEED_ITEM_AGE = timedelta(days=14)
 
 
 def normalize_url(url: str) -> str:
@@ -102,11 +98,20 @@ def titles_are_near_duplicates(left: str, right: str, threshold: float = 0.88) -
     return len(left_tokens & right_tokens) / len(left_tokens | right_tokens) >= threshold
 
 
-def _published_at(entry) -> datetime:
+def _published_at(entry) -> datetime | None:
     parsed = entry.get("published_parsed") or entry.get("updated_parsed")
     if parsed:
         return datetime.fromtimestamp(calendar.timegm(parsed), tz=timezone.utc)
-    return datetime.now(timezone.utc)
+    return None
+
+
+def _recent_dated_entries(entries, now: datetime) -> list[tuple[dict, datetime]]:
+    recent = []
+    for entry in entries:
+        published = _published_at(entry)
+        if published and now - MAX_FEED_ITEM_AGE <= published <= now + timedelta(days=1):
+            recent.append((entry, published))
+    return recent
 
 
 def _plain_snippet(entry) -> str | None:
@@ -128,61 +133,120 @@ def fetch_and_store_news() -> dict:
     """, (started_at,))
     run_id = cursor.fetchone()[0]
     conn.commit()
-    rows_written, warnings, skipped = 0, [], []
+    rows_written, warnings, errors, skipped, successful_feeds = 0, [], [], [], 0
 
-    for feed_id, config in FEEDS.items():
-        if feed_id not in NEWS_FEEDS_ENABLED or not config["url"]:
-            skipped.append({"feed": feed_id, "reason": config["status"]})
-            continue
+    try:
+        for feed_id, config in FEEDS.items():
+            if feed_id not in NEWS_FEEDS_ENABLED or not config["url"]:
+                skipped.append({"feed": feed_id, "reason": "disabled_by_config"})
+                continue
+            try:
+                response = requests.get(config["url"], timeout=20, headers={"User-Agent": "FinPipeline/1.0 (+portfolio research)"})
+                response.raise_for_status()
+                parsed = feedparser.parse(response.content)
+                if parsed.bozo and not parsed.entries:
+                    raise ValueError(f"invalid feed: {parsed.bozo_exception}")
+                now = datetime.now(timezone.utc)
+                entries = _recent_dated_entries(parsed.entries, now)
+                if not entries:
+                    raise ValueError("feed returned no recent dated items")
+                for entry, published in entries:
+                    title = html.unescape(str(entry.get("title", ""))).strip()
+                    link = str(entry.get("link", "")).strip()
+                    if not title or not link:
+                        continue
+                    cursor.execute(
+                        "SELECT title FROM news_articles WHERE published_at >= %s",
+                        (published - timedelta(hours=48),),
+                    )
+                    if any(titles_are_near_duplicates(title, row[0]) for row in cursor.fetchall()):
+                        continue
+                    normalized = normalize_url(link)
+                    cursor.execute("""
+                        INSERT INTO news_articles (source, title, url, url_hash, published_at, snippet)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (url_hash) DO NOTHING RETURNING id
+                    """, (config["source"], title, normalized, url_hash(normalized), published, _plain_snippet(entry)))
+                    inserted = cursor.fetchone()
+                    if not inserted:
+                        continue
+                    article_id = inserted[0]
+                    tags = tag_headline(title)
+                    for tag_type, values in (("ticker", tags["tickers"]), ("sector", tags["sectors"])):
+                        for tag in values:
+                            cursor.execute(
+                                "INSERT INTO news_tags (article_id, tag_type, tag) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+                                (article_id, tag_type, tag),
+                            )
+                    rows_written += 1
+                conn.commit()
+                successful_feeds += 1
+            except Exception as error:
+                conn.rollback()
+                warnings.append(f"{feed_id}: {error}")
+
+        cursor.execute("DELETE FROM news_articles WHERE published_at < NOW() - INTERVAL '365 days'")
+        conn.commit()
+        if successful_feeds == 0:
+            errors = warnings.copy() or ["no enabled feed completed"]
+        status = "failed" if errors else "partial" if warnings else "success"
+        cursor.execute("""
+            UPDATE pipeline_runs SET status=%s, records_fetched=%s, error_message=%s,
+                completed_at=%s, duration_ms=%s WHERE id=%s
+        """, (status, rows_written, '\n'.join(warnings) or None,
+              datetime.now(timezone.utc), round((time.monotonic() - started_clock) * 1000), run_id))
+        conn.commit()
+    except Exception as error:
+        conn.rollback()
+        errors.append(f"news job: {error}")
         try:
-            response = requests.get(config["url"], timeout=20, headers={"User-Agent": "FinPipeline/1.0 (+portfolio research)"})
-            response.raise_for_status()
-            parsed = feedparser.parse(response.content)
-            for entry in parsed.entries:
-                title, link = str(entry.get("title", "")).strip(), str(entry.get("link", "")).strip()
-                if not title or not link:
-                    continue
-                published = _published_at(entry)
-                cursor.execute(
-                    "SELECT title FROM news_articles WHERE published_at >= %s",
-                    (published - timedelta(hours=48),),
-                )
-                if any(titles_are_near_duplicates(title, row[0]) for row in cursor.fetchall()):
-                    continue
-                normalized = normalize_url(link)
-                cursor.execute("""
-                    INSERT INTO news_articles (source, title, url, url_hash, published_at, snippet)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (url_hash) DO NOTHING RETURNING id
-                """, (config["source"], title, normalized, url_hash(normalized), published, _plain_snippet(entry)))
-                inserted = cursor.fetchone()
-                if not inserted:
-                    continue
-                article_id = inserted[0]
-                tags = tag_headline(title)
-                for tag_type, values in (("ticker", tags["tickers"]), ("sector", tags["sectors"])):
-                    for tag in values:
-                        cursor.execute(
-                            "INSERT INTO news_tags (article_id, tag_type, tag) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
-                            (article_id, tag_type, tag),
-                        )
-                rows_written += 1
+            cursor.execute("""
+                UPDATE pipeline_runs SET status='failed', records_fetched=%s, error_message=%s,
+                    completed_at=%s, duration_ms=%s WHERE id=%s
+            """, (rows_written, '\n'.join(errors), datetime.now(timezone.utc),
+                  round((time.monotonic() - started_clock) * 1000), run_id))
             conn.commit()
-        except Exception as error:
+        except Exception:
             conn.rollback()
-            warnings.append(f"{feed_id}: {error}")
+    finally:
+        cursor.close()
+        conn.close()
+    return {"run_id": run_id, "total_inserted": rows_written, "errors": errors, "warnings": warnings, "skipped": skipped}
 
-    cursor.execute("DELETE FROM news_articles WHERE published_at < NOW() - INTERVAL '365 days'")
-    conn.commit()
-    cursor.execute("""
-        UPDATE pipeline_runs SET status=%s, records_fetched=%s, error_message=%s,
-            completed_at=%s, duration_ms=%s WHERE id=%s
-    """, ('partial' if warnings else 'success', rows_written, '\n'.join(warnings) or None,
-          datetime.now(timezone.utc), round((time.monotonic() - started_clock) * 1000), run_id))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return {"run_id": run_id, "total_inserted": rows_written, "errors": [], "warnings": warnings, "skipped": skipped}
+
+def evaluate_tagging_rows(rows: list[dict[str, str]]) -> dict:
+    """Return reproducible micro-averaged metrics for hand-labeled rows."""
+    allowed = set(ALIASES) | set(SECTOR_ALIASES)
+    seen_titles = set()
+    true_positive = false_positive = false_negative = 0
+    failures = []
+    for row in rows:
+        title = row["title"]
+        if title in seen_titles:
+            raise ValueError(f"duplicate evaluation title: {title}")
+        seen_titles.add(title)
+        expected = {
+            label for field in ("expected_tickers", "expected_sectors")
+            for label in row[field].split(";") if label
+        }
+        unknown = expected - allowed
+        if unknown:
+            raise ValueError(f"unknown evaluation labels: {sorted(unknown)}")
+        prediction = tag_headline(title)
+        predicted = set(prediction["tickers"] + prediction["sectors"])
+        true_positive += len(predicted & expected)
+        false_positive += len(predicted - expected)
+        false_negative += len(expected - predicted)
+        if predicted != expected:
+            failures.append({"title": title, "expected": sorted(expected), "predicted": sorted(predicted)})
+    precision = true_positive / (true_positive + false_positive) if true_positive + false_positive else 0
+    recall = true_positive / (true_positive + false_negative) if true_positive + false_negative else 0
+    return {
+        "headlines": len(rows), "true_positive": true_positive,
+        "false_positive": false_positive, "false_negative": false_negative,
+        "precision": round(precision, 4), "recall": round(recall, 4),
+        "failures": failures,
+    }
 
 
 def calculate_move_days(prices: pd.DataFrame, sigma: float = 2.0, lookback: int = 90) -> pd.DataFrame:

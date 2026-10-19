@@ -1,18 +1,23 @@
-# News tagging evaluation status
+# News tagging evaluation
 
-The requested 50-headline evaluation is intentionally not checked in. On 17 October 2026, the configured Economic Times, Mint, and Business Standard market feeds were technically live, but their published terms limit automated reuse and/or AI evaluation without written permission. Moneycontrol's current RSS endpoints returned HTTP 403; old mirror feeds contained only 2009 items.
+On 19 October 2026, 50 current RSS headlines were sampled in feed order and hand-labeled against the project's deliberately narrow ticker/index and sector taxonomy. The sample contains 17 Economic Times Markets, 17 Mint Markets, and 16 Business Standard Markets headlines. The labeled rows are in `eval/news_tagging.csv`; they are real headlines, not synthetic fixtures.
 
-Because the project rules say to respect publisher terms, copying those headlines into `eval/news_tagging.csv` would be the wrong result. The file therefore contains only its schema and no fabricated examples. Precision and recall are **not reported** because the labeled sample size is zero. Unit tests use clearly synthetic strings to test boundary, capitalization, ticker, and sector behavior.
+Run the reproducible measurement with:
 
-Feeds remain config-driven but disabled by default. After written permission is obtained, enable exact feed IDs with `NEWS_FEEDS_ENABLED`, hand-label 50 permitted headlines, and calculate:
+```bash
+PYTHONPATH=finpipeline poetry run python scripts/evaluate_news_tags.py
+```
 
-- precision = correct predicted tags / all predicted tags;
-- recall = correct predicted tags / all expected tags;
-- results split by ticker and sector, with every false positive and false negative retained.
+The current result is **100.0% precision and 65.7% recall**: 23 correct predicted tags, zero false positives, and 12 missed expected tags. These are micro-averaged tag decisions across both ticker and sector labels. The result is a small development-set measurement, not evidence of general model quality.
 
-Terms/source checks:
+The misses show the intended tradeoff. The word-boundary dictionary avoids guessing, but misses implied sectors such as AI/chips → technology, renewable → energy, broking/brokerages → financials, Jio → telecom, and sugar producers → consumer. The ticker/index aliases performed better on this sample: explicit Sensex, Nifty, State Bank of India, Reliance/Jio, RIL, and Airtel mentions were tagged. No misses were hidden or relabeled after running the code.
 
-- Economic Times RSS: <https://economictimes.indiatimes.com/rss.cms>
-- Mint terms and RSS: <https://www.livemint.com/terms-of-use>, <https://www.livemint.com/rss>
-- Business Standard terms: <https://www.business-standard.com/terms-conditions>
-- Moneycontrol RSS services: <https://www.moneycontrol.com/news/rss-services/news/>
+Feed verification on the same date:
+
+- Economic Times Markets: HTTP 200, 50 current RSS items.
+- Mint Markets: HTTP 200, 35 current RSS items.
+- Business Standard Markets: HTTP 200, 35 current RSS items.
+- Moneycontrol: its advertised XML feeds returned data last published on 23 April 2024, so the source was dropped rather than presented as current.
+- GDELT fallback: not used because three requested feeds were technically live; a direct verification request also returned HTTP 429 from the development environment.
+
+Only feed-provided headline metadata, direct links, timestamps, and short snippets are ingested—never article bodies. Publisher RSS terms limit reuse, particularly for commercial syndication. Keep this as a non-commercial portfolio demonstration, retain direct attribution/links, and obtain written permission or disable a feed before broader or commercial reuse. Set `NEWS_FEEDS_ENABLED=false` to disable all feeds.

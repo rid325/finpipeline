@@ -18,6 +18,7 @@ SCHEDULED_JOB_NAMES = (
     "macro-all",
     "market-global",
     "market-india",
+    "news-india",
     "regime-india-us-v1",
 )
 
@@ -39,7 +40,7 @@ def _job_cadence(job_name: str) -> dict:
         }
     if job_name == "news-india":
         return {
-            "expected_cadence": "every 4 hours when licensed feeds are enabled",
+            "expected_cadence": "every 4 hours",
             "threshold_unit": "hours",
             "fresh_threshold": 6,
             "delayed_threshold": 12,
@@ -157,13 +158,20 @@ def get_freshness() -> dict:
     jobs = build_job_freshness(cursor.fetchall(), now)
     cursor.execute("SELECT MAX(published_at), COUNT(*) FROM news_articles")
     latest_news, news_count = cursor.fetchone()
+    if not NEWS_FEEDS_ENABLED:
+        news_status = "not_configured"
+    elif not latest_news:
+        news_status = "never_loaded"
+    else:
+        news_age = max((now - _as_utc(latest_news)).total_seconds() / 3600, 0)
+        news_status = "fresh" if news_age <= 6 else "delayed" if news_age <= 12 else "stale"
     cursor.close(); conn.close()
     return {
         "generated_at": now.isoformat(),
         "instruments": instruments, "macro_series": macro,
         "news": {"configured": bool(NEWS_FEEDS_ENABLED), "article_count": news_count,
                  "as_of": latest_news.isoformat() if latest_news else None,
-                 "status": "not_configured" if not NEWS_FEEDS_ENABLED else "never_loaded" if not latest_news else "available"},
+                 "status": news_status},
         "jobs": jobs,
     }
 
@@ -188,6 +196,7 @@ def get_methodology() -> dict:
             {"name": "Yahoo Finance", "data": "daily raw and adjusted OHLCV", "cadence": "after exchange close", "expected_delay": "end-of-day; upstream dependent"},
             {"name": "FRED", "data": "US and India macro observations", "cadence": "daily pull", "expected_delay": "series-specific publication lag and revisions"},
             {"name": "Reserve Bank of India", "data": "manually curated policy repo rate CSV", "cadence": "manual after policy changes", "expected_delay": "until repository CSV is reviewed"},
+            {"name": "Indian business RSS feeds", "data": "publisher-provided headline metadata and links", "cadence": "every 4 hours", "expected_delay": "feed dependent"},
         ],
         "analytics": {
             "30_session_change": "latest adjusted close / adjusted close 30 stored sessions earlier - 1",
@@ -200,7 +209,7 @@ def get_methodology() -> dict:
         "limitations": [
             "Yahoo Finance and FRED are upstream dependencies and may revise observations.",
             "Indian exchange holidays are represented by an absent session, not an inferred row.",
-            "News sources are disabled until suitable permission is obtained.",
+            "News is headline context only; publisher terms limit broader or commercial reuse.",
             CAVEAT,
         ],
         "not_investment_advice": True,

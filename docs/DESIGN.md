@@ -29,9 +29,10 @@
 - Move days compare absolute adjusted daily return with twice the trailing 90-session standard deviation, shifted one session to keep today's return out of its threshold.
 - News timestamps stay in UTC; move-day joins convert publication time to each instrument's exchange timezone, including IST for Indian instruments.
 - A 365-day delete runs with ingestion. At roughly 200 short RSS records/day, a conservative 1–2 KB per record plus indexes is about 73–146 MB/year.
-- ET, Mint, and Business Standard feeds were technically verified but require permission for this use; Moneycontrol returned HTTP 403, so all are disabled by default.
-- The scheduled job is still useful and safe: a licensed source can be enabled by feed ID without code changes, and one failing feed produces a partial run rather than discarding others.
-- The requested real 50-headline evaluation was rejected rather than copied against terms; the zero-sample limitation is explicit in `docs/news_tagging_eval.md`.
+- ET, Mint, and Business Standard feeds returned current RSS items on 19 October 2026 and are enabled for this non-commercial portfolio demonstration. Moneycontrol's XML feeds were stale at April 2024 and were dropped.
+- One failing feed produces a partial run rather than discarding successful sources; if every feed fails, the CLI exits non-zero so automation cannot report a false success.
+- The 50-headline hand-labeled development sample reports 100.0% precision and 65.7% recall, with all 12 misses documented in `docs/news_tagging_eval.md`.
+- Direct attribution and links are preserved and article bodies are never fetched. Publisher terms still limit reuse, so written permission is required before commercial syndication.
 - `feedparser` is the only runtime dependency added: it handles RSS date/namespace variations more safely than a custom XML parser.
 
 ## Phase 3 — India-aware regime analogues

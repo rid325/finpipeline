@@ -7,7 +7,7 @@ Key package paths:
 - `src/api.py` — FastAPI routes and optional local scheduler
 - `src/jobs.py` — one-shot market, macro, news, and regime jobs
 - `src/instruments.py` — database-backed instrument/series registries
-- `src/news.py` — licensed-opt-in RSS ingestion, dedupe, tags, and move-day joins
+- `src/news.py` — RSS metadata ingestion, dedupe, tags, and move-day joins
 - `src/regime_v2.py` — no-lookahead India/US analogy engine
 - `src/methodology.py` — freshness and methodology contracts
 - `migrations/` — complete Alembic schema history

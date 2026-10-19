@@ -443,7 +443,7 @@ def news(
     source: str | None = None,
     limit: int = Query(default=50, ge=1, le=100),
 ):
-    """Licensed-opt-in Indian market headlines and deterministic tags."""
+    """Indian market RSS headlines and deterministic tags."""
     if from_date:
         validate_date(from_date, "from")
     if to_date:

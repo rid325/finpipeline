@@ -11,7 +11,7 @@ flowchart LR
   Yahoo[Yahoo Finance] --> Jobs[GitHub Actions jobs]
   FRED[FRED] --> Jobs
   RBI[Curated RBI CSV] --> Jobs
-  RSS[Licensed RSS opt-in] --> Jobs
+  RSS[Indian market RSS metadata] --> Jobs
   Jobs --> Neon[(Neon PostgreSQL)]
   Neon --> API[FastAPI on Render]
   API --> UI[Chart.js dashboard]
@@ -43,6 +43,7 @@ Open <http://localhost:8000>. Load data explicitly:
 docker compose run --rm api python -m src.jobs run market --market india --backfill
 docker compose run --rm api python -m src.jobs run market --market global --backfill
 docker compose run --rm api python -m src.jobs run macro --backfill
+docker compose run --rm api python -m src.jobs run news
 docker compose run --rm api python -m src.jobs run regime
 ```
 
@@ -64,7 +65,7 @@ Copy `.env.example` and set:
 | `AUTH_USERNAME`, `AUTH_PASSWORD` | Optional legacy protected endpoint login |
 | `FRED_API_KEY` | Optional; public CSV is the fallback |
 | `ENABLE_APSCHEDULER` | Defaults false; production schedules are external |
-| `NEWS_FEEDS_ENABLED` | Comma-separated feed IDs, only after suitable permission |
+| `NEWS_FEEDS_ENABLED` | Optional comma-separated feed IDs; defaults to verified feeds, `false` disables news |
 
 ## API surface
 
@@ -84,9 +85,9 @@ The regime response is historical similarity on a small, revised-data sample—n
 
 Detailed database migration notes are in [`docs/HOSTING.md`](docs/HOSTING.md).
 
-## News licensing
+## News sources and evaluation
 
-Economic Times, Mint, and Business Standard feeds were technically live when checked, but were not enabled because their terms restrict the planned automated reuse/evaluation without permission. Moneycontrol returned HTTP 403. No publisher corpus or invented evaluation result is committed. See [`docs/news_tagging_eval.md`](docs/news_tagging_eval.md).
+Economic Times Markets, Mint Markets, and Business Standard Markets returned current RSS items when verified on 19 October 2026. Moneycontrol's advertised XML feeds were stale at April 2024 and were dropped. The job stores feed-provided metadata only and links directly to the publisher; it never scrapes article bodies. The checked-in 50-headline evaluation measures 100.0% precision and 65.7% recall on the narrow alias taxonomy. See [`docs/news_tagging_eval.md`](docs/news_tagging_eval.md) for the sample, failure cases, and publisher-use caveat.
 
 ## Tests
 
